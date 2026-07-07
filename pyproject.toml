@@ -1,0 +1,15 @@
+[project]
+name = "scm-kpi-automation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "google-api-python-client>=2.198.0",
+    "google-auth>=2.55.1",
+    "google-genai>=2.10.0",
+    "gspread>=6.2.1",
+    "pandas>=3.0.3",
+    "python-dotenv>=1.2.2",
+    "truststore>=0.10.4",
+]
