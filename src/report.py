@@ -4,8 +4,10 @@ The HTML breakup table mirrors the SUMMARY sheet layout: a yellow date banner
 and a pink "Commitment not Given – Over Due days" band over a 3-row header,
 followed by a Sub Total row.
 """
-from datetime import date
+from datetime import date, datetime
 from html import escape
+
+from .kpi_engine import DATE_FORMAT
 
 # Brand-ish palette (inline styles are required for email clients).
 _HEADER_BG = "#1f2937"      # slate
@@ -215,6 +217,35 @@ def _num(value: int, *, blank_zero: bool = True) -> str:
     return "" if (blank_zero and int(value) == 0) else str(int(value))
 
 
+def _parse_date(value: str):
+    """Parse a ``DD-MM-YYYY`` sheet date string; ``None`` if blank/unparseable."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, DATE_FORMAT).date()
+    except ValueError:
+        return None
+
+
+def _days_delay_style(days_delay: int) -> str:
+    """Red when the delay from first commitment has reached 5+ days."""
+    return f"color:{_NEG};font-weight:700;" if int(days_delay) >= 5 else ""
+
+
+def _future_date_style(value: str) -> str:
+    """Red when a committed/expected date is still ahead of today."""
+    parsed = _parse_date(value)
+    return f"color:{_NEG};font-weight:700;" if parsed and parsed > date.today() else ""
+
+
+def _vessel_cutoff_style(value: str) -> str:
+    """Red when the vessel cut-off is within 3 days of today (either side)."""
+    parsed = _parse_date(value)
+    if parsed and abs((parsed - date.today()).days) <= 3:
+        return f"color:{_NEG};font-weight:700;"
+    return ""
+
+
 def _breakup_rows_html(breakup: list[dict]) -> str:
     rows = []
     for i, b in enumerate(breakup):
@@ -225,14 +256,14 @@ def _breakup_rows_html(breakup: list[dict]) -> str:
             f'<tr style="background:{bg};">'
             f'<td style="{_TD_LEFT}">{escape(b["country"])}</td>'
             f'<td style="{_TD}font-weight:700;color:{over_color};">{over}</td>'
-            f'<td style="{_TD}">{_num(b["days_delay"])}</td>'
-            f'<td style="{_TD}">{escape(b["new_committed_date"])}</td>'
-            f'<td style="{_TD}">{escape(b["container_expected_date"])}</td>'
+            f'<td style="{_TD}{_days_delay_style(b["days_delay"])}">{_num(b["days_delay"])}</td>'
+            f'<td style="{_TD}{_future_date_style(b["new_committed_date"])}">{escape(b["new_committed_date"])}</td>'
+            f'<td style="{_TD}{_future_date_style(b["container_expected_date"])}">{escape(b["container_expected_date"])}</td>'
             f'<td style="{_TD}">{_num(b["prdn_machines_pending"])}</td>'
             f'<td style="{_TD}">{_num(b["prdn_commitment_changes"])}</td>'
             f'<td style="{_TD}">{_num(b["container_machines_pending"])}</td>'
             f'<td style="{_TD}">{_num(b["container_commitment_changes"])}</td>'
-            f'<td style="{_TD}">{escape(b["vessel_cutoff"])}</td>'
+            f'<td style="{_TD}{_vessel_cutoff_style(b["vessel_cutoff"])}">{escape(b["vessel_cutoff"])}</td>'
             f'<td style="{_TD}">{_num(b["clearance_pending"])}</td>'
             f'<td style="{_TD}"></td>'  # No of days pending
             f"</tr>"
@@ -282,16 +313,16 @@ def _breakup_section_html(breakup: list[dict]) -> str:
           <th rowspan="2" style="{y}">No of Days Delay from 1st Committment</th>
           <th rowspan="2" style="{y}">New Committed Date</th>
           <th rowspan="2" style="{y}">Container Expected Date</th>
-          <th colspan="2" style="{p}">Prdn Committment</th>
-          <th colspan="2" style="{p}">Container Committment</th>
+          <th colspan="2" style="{p}">Prdn Committment Pending</th>
+          <th colspan="2" style="{p}">Container Committment Pending</th>
           <th rowspan="2" style="{p}">Vessel Cut off</th>
           <th rowspan="2" style="{p}">Commerical Clearance Pending</th>
           <th rowspan="2" style="{p}">No of days pending</th>
         </tr>
         <tr>
-          <th style="{p}">No of machines pending</th>
+          <th style="{p}">No of machines</th>
           <th style="{p}">No of commitment changes</th>
-          <th style="{p}">No of machines pending</th>
+          <th style="{p}">No of machines</th>
           <th style="{p}">No of commitment changes</th>
         </tr>
       </thead>
