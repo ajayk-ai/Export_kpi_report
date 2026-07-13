@@ -92,10 +92,9 @@ as-is including a sheet typo that's intentionally tolerated):
 
 | Column | Used for |
 |---|---|
-| `Month` | Which monthly bucket a row belongs to (`APRIL`, `MAY`, `JUNE`, …). |
-| `Order Type (N / O)` | `"N"` = new order counted in that month's `new_order`. |
+| `Month` | Which monthly bucket a row belongs to (`MAY`, `JUNE`, `JULY`, …). |
 | `Quantity` | The unit count summed for every KPI/breakup metric. |
-| `Loading (Dispatched) Date` | Presence of a valid `DD-MM-YYYY` date = dispatched/closed. |
+| `Loading (Dispatched) Date` | A valid `DD-MM-YYYY` date that is on/before today **and** in the order's own month (or earlier) = dispatched/closed; blank, `Pending`, a future date, or a later-month date = still open. |
 | `Country` | Groups the overdue breakup. |
 | `over due days` | > 0 marks a row "overdue" for the breakup section. |
 | `Machine Revision Date` | Source for each country's "New Committed Date". |
@@ -117,21 +116,25 @@ treated as "not a real date" — e.g. not dispatched.
 
 ```
 opening_order  = prev_balance                                   # carried from previous month
-new_order      = SUM(Quantity) WHERE Month == month AND Order Type == "N"
+new_order      = SUM(Quantity) WHERE Month == month             # every order line in the month
 total_order    = opening_order + new_order
 dispatched     = SUM(Quantity) WHERE Month == month AND Loading Date is a real date
-balance        = total_order - dispatched
+                                     that is on/before today AND in this month or earlier
+                                     # a future-dated OR later-month load = still pending
+balance        = total_order - dispatched                       # = open orders still pending dispatch
 ```
 
 `compute_all_kpis(df)` runs this for every month in
-`MONTH_ORDER = ["APRIL", "MAY", "JUNE"]` **in order**, feeding each month's
+`MONTH_ORDER = ["MAY", "JUNE", "JULY"]` **in order**, feeding each month's
 `balance` in as the next month's `opening_order` (starting at 0 for the first
 month). To add a new month, extend `MONTH_ORDER` — nothing else needs to
 change.
 
-Note: only rows with `Order Type == "N"` feed `new_order`. Rows with other
-order types (e.g. an `"O"` for "open"/carry-over) are not summed again here —
-they're expected to already be reflected via `opening_order`/`prev_balance`.
+An order is "open" when its `Loading (Dispatched) Date` is blank/`Pending`;
+`balance` is exactly those still-open units. Because the dispatched rows are a
+subset of the month's rows, `dispatched <= new_order`, so `balance` (and the
+`opening_order` it feeds) can never go negative. There is no longer an
+`Order Type (N / O)` column — every line is counted in the month it belongs to.
 
 `latest_month(df)` — used when `REPORT_MONTH` is blank — returns the last
 month (per `MONTH_ORDER`) that actually appears in the sheet's `Month`

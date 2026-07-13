@@ -38,6 +38,7 @@ class Settings:
     worksheet_name: str
     delegated_user: str  # impersonate via domain-wide delegation; "" to disable
     report_month: str  # month to filter the country breakup on; "" = latest in data
+    filter_webapp_url: str  # Apps Script Web App /exec URL; "" disables the links
 
     # Email (SMTP)
     smtp_host: str
@@ -63,6 +64,7 @@ class Settings:
             worksheet_name=os.getenv("WORKSHEET_NAME", "SCM_Export"),
             delegated_user=os.getenv("GOOGLE_DELEGATED_USER", ""),
             report_month=os.getenv("REPORT_MONTH", "").strip(),
+            filter_webapp_url=os.getenv("FILTER_WEBAPP_URL", "").strip(),
             smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
             smtp_port=int(os.getenv("SMTP_PORT", "465")),
             smtp_user=smtp_user,

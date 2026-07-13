@@ -6,7 +6,9 @@ followed by a Sub Total row.
 """
 from datetime import date, datetime
 from html import escape
+from urllib.parse import urlencode
 
+from .config import settings
 from .kpi_engine import DATE_FORMAT
 
 # Brand-ish palette (inline styles are required for email clients).
@@ -32,14 +34,6 @@ def _report_date() -> str:
     return f"{today.day}-{today:%b}-{today.year}"
 
 
-def _months_to_show(kpis: list[dict], month: str | None) -> list[dict]:
-    if month:
-        rows = [k for k in kpis if str(k["month"]).upper() == month.upper()]
-        if rows:
-            return rows
-    return kpis
-
-
 # --------------------------------------------------------------------------- #
 # Plain text (email fallback + console)
 # --------------------------------------------------------------------------- #
@@ -47,9 +41,12 @@ def text_summary(
     kpis: list[dict],
     breakup: list[dict] | None = None,
     ai_summary: str = "",
-    month: str | None = None,
 ) -> str:
-    """Plain-text version, used as the email fallback and for console output."""
+    """Plain-text version, used as the email fallback and for console output.
+
+    Shows every month's KPI line so the opening/balance carry-forward trend is
+    visible; the breakup below is already scoped to its target month.
+    """
     lines = [
         f"{k['month']}: "
         f"Opening={k['opening_order']}, "
@@ -57,7 +54,7 @@ def text_summary(
         f"Total={k['total_order']}, "
         f"Despatched={k['dispatched']}, "
         f"Balance={k['balance']}"
-        for k in _months_to_show(kpis, month)
+        for k in kpis
     ]
     body = "\n".join(lines)
     if ai_summary:
@@ -137,7 +134,7 @@ def _kpi_rows_html(kpis: list[dict]) -> str:
     return "".join(cells)
 
 
-def _summary_table_html(kpis: list[dict], month: str | None) -> str:
+def _summary_table_html(kpis: list[dict]) -> str:
     header_cell = (
         'style="padding:10px 14px;text-align:right;color:#ffffff;'
         'font-weight:600;font-size:13px;"'
@@ -155,7 +152,7 @@ def _summary_table_html(kpis: list[dict], month: str | None) -> str:
         </tr>
       </thead>
       <tbody>
-        {_kpi_rows_html(_months_to_show(kpis, month))}
+        {_kpi_rows_html(kpis)}
       </tbody>
     </table>"""
 
@@ -232,10 +229,15 @@ def _days_delay_style(days_delay: int) -> str:
     return f"color:{_NEG};font-weight:700;" if int(days_delay) >= 5 else ""
 
 
-def _future_date_style(value: str) -> str:
-    """Red when a committed/expected date is still ahead of today."""
+def _missed_date_style(value: str) -> str:
+    """Red when a committed/expected date has already passed; today or later is fine."""
     parsed = _parse_date(value)
-    return f"color:{_NEG};font-weight:700;" if parsed and parsed > date.today() else ""
+    return f"color:{_NEG};font-weight:700;" if parsed and parsed < date.today() else ""
+
+
+def _machines_pending_style(value: int) -> str:
+    """Red when more than 5 machines are pending."""
+    return f"color:{_NEG};font-weight:700;" if int(value) > 5 else ""
 
 
 def _vessel_cutoff_style(value: str) -> str:
@@ -244,6 +246,19 @@ def _vessel_cutoff_style(value: str) -> str:
     if parsed and abs((parsed - date.today()).days) <= 3:
         return f"color:{_NEG};font-weight:700;"
     return ""
+
+
+def _over_due_cell(country: str, over: int) -> str:
+    """The Over Due Breakup value, linked to the country's filtered sheet view.
+
+    Clicking it opens the Apps Script Web App (see appscript/CountryFilterLink.gs),
+    which filters the sheet down to that country and redirects the browser there.
+    Renders as plain text if FILTER_WEBAPP_URL isn't configured.
+    """
+    if not settings.filter_webapp_url:
+        return str(over)
+    href = f"{settings.filter_webapp_url}?{urlencode({'country': country})}"
+    return f'<a href="{escape(href)}" style="color:inherit;text-decoration:underline;">{over}</a>'
 
 
 def _breakup_rows_html(breakup: list[dict]) -> str:
@@ -255,17 +270,16 @@ def _breakup_rows_html(breakup: list[dict]) -> str:
         rows.append(
             f'<tr style="background:{bg};">'
             f'<td style="{_TD_LEFT}">{escape(b["country"])}</td>'
-            f'<td style="{_TD}font-weight:700;color:{over_color};">{over}</td>'
+            f'<td style="{_TD}font-weight:700;color:{over_color};">{_over_due_cell(b["country"], over)}</td>'
             f'<td style="{_TD}{_days_delay_style(b["days_delay"])}">{_num(b["days_delay"])}</td>'
-            f'<td style="{_TD}{_future_date_style(b["new_committed_date"])}">{escape(b["new_committed_date"])}</td>'
-            f'<td style="{_TD}{_future_date_style(b["container_expected_date"])}">{escape(b["container_expected_date"])}</td>'
-            f'<td style="{_TD}">{_num(b["prdn_machines_pending"])}</td>'
+            f'<td style="{_TD}{_missed_date_style(b["new_committed_date"])}">{escape(b["new_committed_date"])}</td>'
+            f'<td style="{_TD}{_missed_date_style(b["container_expected_date"])}">{escape(b["container_expected_date"])}</td>'
+            f'<td style="{_TD}{_machines_pending_style(b["prdn_machines_pending"])}">{_num(b["prdn_machines_pending"])}</td>'
             f'<td style="{_TD}">{_num(b["prdn_commitment_changes"])}</td>'
-            f'<td style="{_TD}">{_num(b["container_machines_pending"])}</td>'
+            f'<td style="{_TD}{_machines_pending_style(b["container_machines_pending"])}">{_num(b["container_machines_pending"])}</td>'
             f'<td style="{_TD}">{_num(b["container_commitment_changes"])}</td>'
             f'<td style="{_TD}{_vessel_cutoff_style(b["vessel_cutoff"])}">{escape(b["vessel_cutoff"])}</td>'
             f'<td style="{_TD}">{_num(b["clearance_pending"])}</td>'
-            f'<td style="{_TD}"></td>'  # No of days pending
             f"</tr>"
         )
     return "".join(rows)
@@ -287,7 +301,6 @@ def _breakup_subtotal_html(breakup: list[dict]) -> str:
         f'<td style="{sub_td}">{t["container_commitment_changes"]}</td>'
         f'<td style="{sub_td}"></td>'  # Vessel Cut off
         f'<td style="{sub_td}">{t["clearance_pending"]}</td>'
-        f'<td style="{sub_td}"></td>'  # No of days pending
         f"</tr>"
     )
 
@@ -305,7 +318,7 @@ def _breakup_section_html(breakup: list[dict]) -> str:
       <thead>
         <tr>
           <th colspan="5" style="{yellow_banner}">{_report_date()}</th>
-          <th colspan="7" style="{pink_banner}">Commitment not Given - Over Due days</th>
+          <th colspan="6" style="{pink_banner}">Commitment not Given - Over Due days</th>
         </tr>
         <tr>
           <th rowspan="2" style="{y}text-align:left;">Breakup - Dealer / Customer</th>
@@ -317,7 +330,6 @@ def _breakup_section_html(breakup: list[dict]) -> str:
           <th colspan="2" style="{p}">Container Committment Pending</th>
           <th rowspan="2" style="{p}">Vessel Cut off</th>
           <th rowspan="2" style="{p}">Commerical Clearance Pending</th>
-          <th rowspan="2" style="{p}">No of days pending</th>
         </tr>
         <tr>
           <th style="{p}">No of machines</th>
@@ -349,7 +361,7 @@ def html_report(
   </div>
   <div style="border:1px solid {_BORDER};border-top:none;border-radius:0 0 8px 8px;padding:24px;">
     {_ai_section_html(ai_summary)}
-    {_summary_table_html(kpis, month)}
+    {_summary_table_html(kpis)}
     {_breakup_section_html(breakup or [])}
     <div style="color:#9ca3af;font-size:12px;margin-top:18px;">
       Balance = Total Order − Despatched. Over Due Breakup and the commitment

@@ -1,10 +1,21 @@
 """KPI computation. Pure functions over a DataFrame — no I/O."""
+from datetime import date
+
 import pandas as pd
 
-MONTH_ORDER = ["APRIL", "MAY", "JUNE"]  # extend as needed
+MONTH_ORDER = ["MAY", "JUNE", "JULY"]  # extend as needed
+
+# Month name -> calendar number, used to tell whether a dispatch slipped into a
+# later month than the order's own Month bucket (see _is_dispatched).
+MONTH_NUM = {
+    "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4, "MAY": 5, "JUNE": 6,
+    "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11,
+    "DECEMBER": 12,
+}
 
 # Raw sheet column headers (SCM_Export tab, columns A–T). Kept here so a header
 # rename in the sheet is a one-line fix.
+COL_MONTH = "Month"
 COL_COUNTRY = "Country"
 COL_QUANTITY = "Quantity"
 COL_MACHINE_REVISION = "Machine Revision Date"
@@ -30,20 +41,29 @@ _CLEARANCE_DONE = {"completed", "complete", "cleared", "done", "yes"}
 
 
 def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> dict:
-    # Opening order carries over from the previous month's balance.
+    # Opening order carries over from the previous month's balance. Balance is
+    # always >= 0 (see below), so opening order is never negative either.
     opening_order = prev_balance
 
-    # New orders: Order Type 'N' in the current month.
-    new_order = df[
-        (df["Month"] == month) & (df["Order Type (N / O)"] == "N")
-    ]["Quantity"].sum()
+    # Case/whitespace-insensitive month match, so 'July'/' JULY ' both work.
+    in_month = _col(df, "Month").astype(str).str.strip().str.upper() == month.upper()
+    qty = _to_numeric(_col(df, COL_QUANTITY))
+
+    # New orders: every order line in the month. (There's no longer an Order Type
+    # column to distinguish new vs carry-over — an order is simply counted in the
+    # month it belongs to.)
+    new_order = int(qty[in_month].sum())
 
     total_order = opening_order + new_order
 
-    # Despatched: rows with a loading date, in the current month.
-    dispatched = df[
-        df["Loading (Dispatched) Date"].notna() & (df["Month"] == month)
-    ]["Quantity"].sum()
+    # Despatched = order lines in the month that have really shipped for their
+    # month (a loading date in this month or earlier; a later-month date is still
+    # pending). These rows are a subset of the month's rows, so dispatched <=
+    # new_order, which keeps balance (open orders) at zero or positive.
+    dispatched_mask = in_month & _is_dispatched(
+        _col(df, COL_LOADING_DATE), _col(df, COL_MONTH)
+    )
+    dispatched = int(qty[dispatched_mask].sum())
 
     balance = total_order - dispatched
 
@@ -99,15 +119,29 @@ def _to_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(0)
 
 
-def _is_dispatched(series: pd.Series) -> pd.Series:
-    """True only where the loading cell holds a real date.
+def _is_dispatched(loading: pd.Series, months: pd.Series) -> pd.Series:
+    """True only where the order has really shipped.
 
-    In the sheet an order that hasn't shipped shows a blank cell or the literal
-    ``Pending`` — neither is a dispatch, so both count as still open. Dispatch
-    dates are stored day-first (``DD-MM-YYYY``); anything that doesn't parse as
-    such is treated as not-yet-dispatched.
+    A dispatch counts when the loading cell holds a real date (day-first
+    ``DD-MM-YYYY``) that is BOTH:
+
+    * on or before today — a load date in the future hasn't shipped yet; and
+    * in the order's ``Month`` bucket or earlier — a date in a *later* month than
+      the bucket is a dispatch that slipped past its month.
+
+    Anything else is still pending/open: a blank cell, the literal ``Pending``, a
+    future-dated load, or a later-month load. (Buckets carry no year, so the month
+    numbers are compared within the loading date's own year, which is what the
+    single-year reporting window needs.)
     """
-    return pd.to_datetime(series, format=DATE_FORMAT, errors="coerce").notna()
+    loaded = pd.to_datetime(loading, format=DATE_FORMAT, errors="coerce")
+    bucket = months.astype(str).str.strip().str.upper().map(MONTH_NUM)
+    # not_slipped is False for a later-month dispatch; unknown bucket names fall
+    # back to "any real date counts", preserving the old behaviour.
+    not_slipped = (loaded.dt.month <= bucket) | bucket.isna()
+    # not_future is False for a load date after today (still to happen).
+    not_future = loaded <= pd.Timestamp(date.today())
+    return loaded.notna() & not_slipped & not_future
 
 
 def _clearance_pending(series: pd.Series) -> pd.Series:
@@ -153,7 +187,7 @@ def compute_country_breakup(
     overdue_days = _to_numeric(_col(df, COL_OVERDUE_DAYS))
     prdn_changes = _to_numeric(_col(df, COL_PRDN_CHANGES))
     container_changes = _to_numeric(_col(df, COL_CONTAINER_CHANGES))
-    is_open = ~_is_dispatched(_col(df, COL_LOADING_DATE))
+    is_open = ~_is_dispatched(_col(df, COL_LOADING_DATE), _col(df, COL_MONTH))
     is_overdue = overdue_days > 0
 
     # Date columns used for the "latest committed" dates shown per country.

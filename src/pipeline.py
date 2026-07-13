@@ -1,6 +1,8 @@
 """Orchestration: fetch sheet data -> compute KPIs -> AI summary -> format -> send."""
 from datetime import datetime
 
+import pandas as pd
+
 from .config import settings
 from .email_client import send_summary_email
 from .gemini_client import generate_summary
@@ -9,13 +11,16 @@ from .report import html_report, text_summary
 from .sheets_client import get_data_as_dataframe
 
 
-def run(send: bool = False) -> str:
+def run(send: bool = False, df: pd.DataFrame | None = None) -> str:
     """Run the full pipeline and return the plain-text summary.
 
-    If ``send`` is True, also email an HTML report (with an AI summary and a
-    plain-text fallback) to ``EMAIL_RECIPIENT``.
+    If ``df`` is given, that DataFrame is used as the data source (handy for
+    testing against a local Excel/CSV file); otherwise the data is fetched from
+    Google Sheets. If ``send`` is True, also email an HTML report (with an AI
+    summary and a plain-text fallback) to ``EMAIL_RECIPIENT``.
     """
-    df = get_data_as_dataframe(settings.sheet_id, settings.worksheet_name)
+    if df is None:
+        df = get_data_as_dataframe(settings.sheet_id, settings.worksheet_name)
     kpis = compute_all_kpis(df)
     # Breakup is filtered to REPORT_MONTH from .env, or the latest month in the
     # data when that's blank.
@@ -23,7 +28,7 @@ def run(send: bool = False) -> str:
     breakup = compute_country_breakup(df, month=month)
     ai_summary = generate_summary(kpis, breakup)
 
-    text = text_summary(kpis, breakup, ai_summary, month=month)
+    text = text_summary(kpis, breakup, ai_summary)
 
     if send:
         if not settings.email_recipient:
