@@ -32,12 +32,21 @@ COL_LOADING_DATE = "Loading (Dispatched) Date"
 COL_OVERDUE_DAYS = "over due days"
 COL_VESSEL_CUTOFF = "Vessel Cut-Off Date"
 COL_CLEARANCE_STATUS = "Commercial Clearance Status"
+# Columns referenced by the business-logic doc's breakup KPIs.
+COL_COMMITMENT_LOADING = "commitment of loading date"          # -> Overdue Breakup
+COL_REVISION_COMMITMENT_LOADING = "revision commitment of loading date"  # -> New Committed Date
+# The sheet header carries a double space; accept the single-space form too.
+COL_COMMITMENT_LOADING_CHANGES = (
+    "no of commitment loading  changes",
+    "no of commitment loading changes",
+)
+COL_PRODUCTION_COMPLETION = "Production Completion Date"       # -> Prdn machines pending
 
 DATE_FORMAT = "%d-%m-%Y"  # sheet stores dates day-first (e.g. 07-07-2026)
 
-# Clearance statuses that count as done; anything else (e.g. "Pending", blank)
-# is treated as clearance pending.
-_CLEARANCE_DONE = {"completed", "complete", "cleared", "done", "yes"}
+# A machine's clearance is pending when its status is literally "Pending" or
+# blank (per the business-logic doc); every other value counts as cleared.
+_CLEARANCE_PENDING_VALUES = {"pending", "", "nan", "none"}
 
 
 def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> dict:
@@ -145,8 +154,30 @@ def _is_dispatched(loading: pd.Series, months: pd.Series) -> pd.Series:
 
 
 def _clearance_pending(series: pd.Series) -> pd.Series:
-    """True where clearance is not done — status is 'Pending', blank, etc."""
-    return ~series.astype(str).str.strip().str.lower().isin(_CLEARANCE_DONE)
+    """True where clearance is pending — status is literally 'Pending' or blank."""
+    return series.astype(str).str.strip().str.lower().isin(_CLEARANCE_PENDING_VALUES)
+
+
+def _dates(col: pd.Series) -> pd.Series:
+    """Parse a day-first date column; unparseable/blank cells become NaT."""
+    return pd.to_datetime(col, format=DATE_FORMAT, errors="coerce")
+
+
+def _blank_or_past(col: pd.Series) -> pd.Series:
+    """Mask: date cell is blank/unparseable OR earlier than today."""
+    parsed = _dates(col)
+    return parsed.isna() | (parsed < pd.Timestamp(date.today()))
+
+
+def _is_past(col: pd.Series) -> pd.Series:
+    """Mask: date cell holds a real date earlier than today."""
+    parsed = _dates(col)
+    return parsed.notna() & (parsed < pd.Timestamp(date.today()))
+
+
+def _is_blank_date(col: pd.Series) -> pd.Series:
+    """Mask: date cell is blank/unparseable (no date committed)."""
+    return _dates(col).isna()
 
 
 def _max_date(mask: pd.Series, *cols: pd.Series) -> str:
@@ -166,13 +197,13 @@ def _max_date(mask: pd.Series, *cols: pd.Series) -> str:
 def compute_country_breakup(
     df: pd.DataFrame, month: str | None = None
 ) -> list[dict]:
-    """Per-country overdue & 'commitment not given' breakup.
+    """Per-country breakup dashboard, one row per unique Country.
 
-    If ``month`` is given, only that month's rows are considered. One row per
-    country that still has an open (undispatched or overdue) order, so
-    zero-overdue countries with open orders still appear. Commitment-section
-    metrics are scoped to overdue rows (``over due days`` > 0), matching the
-    sheet's "Commitment not Given – Over Due days" grouping.
+    Every KPI follows the business-logic doc (``logic_docs/Export Kpi
+    project.docx``). If ``month`` is given, only that month's rows are
+    considered. All "count" KPIs are expressed in machines (sum of Quantity over
+    the matching rows); the "commitment changes" KPIs are averages of their
+    respective change-count columns across the country's rows.
     """
     if df.empty or COL_COUNTRY not in df.columns:
         return []
@@ -184,57 +215,57 @@ def compute_country_breakup(
             return []
 
     qty = _to_numeric(_col(df, COL_QUANTITY))
-    overdue_days = _to_numeric(_col(df, COL_OVERDUE_DAYS))
+    commitment_loading_changes = _to_numeric(_col(df, COL_COMMITMENT_LOADING_CHANGES))
     prdn_changes = _to_numeric(_col(df, COL_PRDN_CHANGES))
     container_changes = _to_numeric(_col(df, COL_CONTAINER_CHANGES))
-    is_open = ~_is_dispatched(_col(df, COL_LOADING_DATE), _col(df, COL_MONTH))
-    is_overdue = overdue_days > 0
 
-    # Date columns used for the "latest committed" dates shown per country.
-    machine_revision = _col(df, COL_MACHINE_REVISION)
+    # Date columns for the latest-committed dates shown per country.
+    revision_commitment_loading = _col(df, COL_REVISION_COMMITMENT_LOADING)
     container_placement = _col(df, COL_CONTAINER_PLACEMENT)
-    container_revision = _col(df, COL_CONTAINER_REVISION)
     vessel_cutoff = _col(df, COL_VESSEL_CUTOFF)
 
-    # "No of machines pending" = open (not-yet-dispatched) machines. Prod- and
-    # container-side use the same open set; they differ only when open machines
-    # are still awaiting a production vs container date (none are, in this data).
-    prdn_pending = is_open
-    container_pending = is_open
-    # Clearance pending = any row (not just overdue) whose clearance isn't done;
-    # in this data the pending clearances sit on open, not-yet-overdue rows.
-    clearance_pending = _clearance_pending(_col(df, COL_CLEARANCE_STATUS))
+    # Row masks, each straight from the doc's KPI definitions.
+    # KPI 2 — Pending Orders: loading date blank, OR the revised loading
+    # commitment has already slipped past today.
+    pending_orders = _is_blank_date(_col(df, COL_LOADING_DATE)) | _is_past(
+        _col(df, COL_REVISION_COMMITMENT_LOADING)
+    )
+    overdue_breakup = _blank_or_past(_col(df, COL_COMMITMENT_LOADING))       # KPI 3
+    prdn_pending = _is_blank_date(_col(df, COL_PRODUCTION_COMPLETION))       # KPI 7A
+    prdn_overdue = _is_past(_col(df, COL_MACHINE_REVISION))                  # KPI 7C
+    container_pending = _is_blank_date(_col(df, COL_CONTAINER_PLACEMENT))    # KPI 8A
+    container_overdue = _is_past(_col(df, COL_CONTAINER_REVISION))           # KPI 8C
+    clearance_pending = _clearance_pending(_col(df, COL_CLEARANCE_STATUS))   # KPI 10
 
     results = []
     for country, idx in df.groupby(COL_COUNTRY).groups.items():
-        rows = df.index.isin(idx)
-        open_rows = rows & is_open
-        overdue_rows = rows & is_overdue
-        if not open_rows.any() and not overdue_rows.any():
-            continue  # nothing outstanding to report
         if str(country).strip() == "":
             continue  # skip blank/unlabelled country rows
+        rows = df.index.isin(idx)
 
-        overdue_day_values = overdue_days[overdue_rows]
+        def machines(mask: pd.Series, _rows: pd.Series = rows) -> int:
+            return int(qty[_rows & mask].sum())
+
+        def average(series: pd.Series, _rows: pd.Series = rows) -> float:
+            vals = series[_rows]
+            return round(float(vals.mean()), 1) if len(vals) else 0.0
 
         results.append(
             {
                 "country": str(country),
-                "over_due_breakup": int(qty[overdue_rows].sum()),
-                "days_delay": int(overdue_day_values.max()) if overdue_rows.any() else 0,
-                # Latest committed dates across the country's overdue rows.
-                "new_committed_date": _max_date(overdue_rows, machine_revision),
-                "container_expected_date": _max_date(
-                    overdue_rows, container_placement, container_revision
-                ),
-                "vessel_cutoff": _max_date(overdue_rows, vessel_cutoff),
-                "prdn_machines_pending": int(qty[rows & prdn_pending].sum()),
-                "prdn_commitment_changes": int(prdn_changes[overdue_rows].sum()),
-                "container_machines_pending": int(qty[rows & container_pending].sum()),
-                "container_commitment_changes": int(
-                    container_changes[overdue_rows].sum()
-                ),
-                "clearance_pending": int(qty[rows & clearance_pending].sum()),
+                "pending_orders": machines(pending_orders),          # KPI 2
+                "over_due_breakup": machines(overdue_breakup),       # KPI 3
+                "days_delay": average(commitment_loading_changes),   # KPI 4
+                "new_committed_date": _max_date(rows, revision_commitment_loading),  # KPI 5
+                "container_expected_date": _max_date(rows, container_placement),     # KPI 6
+                "prdn_machines_pending": machines(prdn_pending),     # KPI 7A
+                "prdn_commitment_changes": average(prdn_changes),    # KPI 7B
+                "prdn_overdue": machines(prdn_overdue),              # KPI 7C
+                "container_machines_pending": machines(container_pending),  # KPI 8A
+                "container_commitment_changes": average(container_changes),  # KPI 8B
+                "container_overdue": machines(container_overdue),    # KPI 8C
+                "vessel_cutoff": _max_date(rows, vessel_cutoff),     # KPI 9
+                "clearance_pending": machines(clearance_pending),    # KPI 10
             }
         )
 

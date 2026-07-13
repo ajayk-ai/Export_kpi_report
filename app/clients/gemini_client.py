@@ -1,7 +1,7 @@
 """Generate a short natural-language summary of the KPIs using Google Gemini."""
 from google import genai
 
-from .config import settings
+from ..config import settings
 
 
 def _build_prompt(kpis: list[dict], breakup: list[dict] | None = None) -> str:

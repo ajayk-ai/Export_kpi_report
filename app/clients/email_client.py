@@ -4,7 +4,7 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from .config import settings
+from ..config import settings
 
 
 def send_summary_email(

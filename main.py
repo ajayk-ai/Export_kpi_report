@@ -1,8 +1,8 @@
 """Entry point. Run from the project root: `uv run python main.py [--send]`."""
 import argparse
 
-from src.config import settings
-from src.pipeline import run
+from app.config import settings
+from app.core.pipeline import run
 
 
 def main() -> None:

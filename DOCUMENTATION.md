@@ -16,53 +16,58 @@ A scheduled/on-demand script that:
 5. Renders everything as plain text (console) and as an HTML report styled to
    look like the source sheet's "SUMMARY" tab.
 6. Optionally emails the HTML report (with plain-text fallback) over SMTP.
+7. Serves the same report **live** over a FastAPI web app for browser preview.
 
-Everything is driven from `main.py`:
+It can be driven three ways — all share the one `build_report()` pipeline:
 
 ```bash
-uv run python main.py            # print the KPI summary
-uv run python main.py --send     # print and email it
+uv run python main.py                    # CLI: print the KPI summary
+uv run python main.py --send             # CLI: print and email it
+uv run uvicorn app.main:app --reload     # Web: live report at /report
 ```
 
 ## 2. Architecture / data flow
 
 ```
-                 .env  ──────────────► src/config.py (Settings)
+                 .env  ──────────────► app/config.py (Settings)
                                              │
 config/service.json (Google creds) ─────────┤
                                              ▼
-Google Sheet (SCM_Export tab) ──► src/sheets_client.py ──► pandas.DataFrame
-                                             │
+     app/core/data_source.py ── from_sheet() ─► app/clients/sheets_client.py ─┐
+        │  from_local()                            (Google Sheet -> DataFrame) │
+        └─► data/test_data.xlsx (offline) ─────────────────────────────────────┤
                                              ▼
-                                   src/kpi_engine.py
+                                   app/core/kpi_engine.py
                               (compute_all_kpis, compute_country_breakup)
                                              │
                           ┌──────────────────┼──────────────────┐
                           ▼                                     ▼
-                 src/gemini_client.py                   src/report.py
+            app/clients/gemini_client.py              app/core/report.py
               (generate_summary — optional)        (text_summary / html_report)
                           │                                     │
                           └──────────────┬──────────────────────┘
                                          ▼
-                                 src/pipeline.py (run)
+                          app/core/pipeline.py :: build_report()
                                          │
-                              ┌──────────┴──────────┐
-                              ▼                     ▼
-                       print(summary)      src/email_client.py (--send only)
-                                              (SMTP send, HTML + text)
+              ┌──────────────────┬───────┴───────────┬───────────────────┐
+              ▼                  ▼                   ▼                   ▼
+      main.py (CLI print)   run(send=True)     app/api/routes.py     /report.json
+                                 │            (GET /report -> HTML)
+                                 ▼
+                      app/clients/email_client.py (SMTP, HTML + text)
 ```
 
-`src/pipeline.py::run()` is the single orchestration point — it is the only
-function that calls the other modules in sequence:
+`app/core/pipeline.py::build_report()` is the single orchestration point — the
+CLI (`run`), the web routes, and the emailer all go through it, so console,
+browser, and email always show the identical report:
 
 ```
-df = get_data_as_dataframe(...)
+df = data_source.load(source)              # 'sheet' (default) or 'local'
 kpis = compute_all_kpis(df)
-month = REPORT_MONTH or latest_month(df)
+month = month_override or REPORT_MONTH or latest_month(df)
 breakup = compute_country_breakup(df, month=month)
-ai_summary = generate_summary(kpis, breakup)
-text = text_summary(...)
-if send: send_summary_email(html_report(...))
+ai_summary = generate_summary(kpis, breakup)   # skipped when use_ai=False
+-> ReportResult(month, kpis, breakup, ai_summary, text, html)
 ```
 
 Every function in `kpi_engine.py` is a **pure function over a DataFrame** —
@@ -74,13 +79,17 @@ about and test independently of Sheets/SMTP/Gemini.
 | File | Responsibility |
 |---|---|
 | [main.py](main.py) | CLI entry point (`argparse`); prints the summary, optionally passes `--send`. |
-| [src/config.py](src/config.py) | Loads `.env` once into a frozen `Settings` dataclass (`settings`). Also injects the OS trust store into `ssl` so corporate TLS-inspection proxies don't break HTTPS calls. |
-| [src/sheets_client.py](src/sheets_client.py) | Authenticates with a Google service account (optionally impersonating a Workspace user via domain-wide delegation) and pulls the worksheet into a `pandas.DataFrame` via `gspread`. |
-| [src/kpi_engine.py](src/kpi_engine.py) | All business logic / math. See §4 and §5 below. |
-| [src/gemini_client.py](src/gemini_client.py) | Builds a prompt from the KPIs + breakup and asks Gemini for an executive summary. Fully optional — degrades to `""` silently on any error or missing API key. |
-| [src/report.py](src/report.py) | Pure rendering: turns KPI/breakup dicts into a plain-text string and into a styled, inline-CSS HTML block (email-client-safe, no external CSS/JS). |
-| [src/email_client.py](src/email_client.py) | Sends the report over SMTP (SSL on port 465, STARTTLS otherwise), `multipart/alternative` so clients without HTML fall back to plain text. |
-| [src/pipeline.py](src/pipeline.py) | Wires the above together end-to-end; the only place that calls more than one module. |
+| [run_local.py](run_local.py) | Offline runner: compute from a local `.xlsx` and write an HTML preview. |
+| [app/main.py](app/main.py) | FastAPI application factory; run with `uvicorn app.main:app`. |
+| [app/api/routes.py](app/api/routes.py) | HTTP endpoints: `/report` (live HTML — the email template), `/report.json`, `/send`, `/health`, `/`. |
+| [app/config.py](app/config.py) | Loads `.env` once into a frozen `Settings` dataclass (`settings`). Also injects the OS trust store into `ssl` so corporate TLS-inspection proxies don't break HTTPS calls. |
+| [app/core/data_source.py](app/core/data_source.py) | Chooses the data source — the live Google Sheet or a local `.xlsx` — returning the same string-typed DataFrame either way. |
+| [app/clients/sheets_client.py](app/clients/sheets_client.py) | Authenticates with a Google service account (optionally impersonating a Workspace user via domain-wide delegation) and pulls the worksheet into a `pandas.DataFrame` via `gspread`. |
+| [app/core/kpi_engine.py](app/core/kpi_engine.py) | All business logic / math. See §4 and §5 below. |
+| [app/clients/gemini_client.py](app/clients/gemini_client.py) | Builds a prompt from the KPIs + breakup and asks Gemini for an executive summary. Fully optional — degrades to `""` silently on any error or missing API key. |
+| [app/core/report.py](app/core/report.py) | Pure rendering: turns KPI/breakup dicts into a plain-text string and into a styled, inline-CSS HTML block (email-client-safe, no external CSS/JS). |
+| [app/clients/email_client.py](app/clients/email_client.py) | Sends the report over SMTP (SSL on port 465, STARTTLS otherwise), `multipart/alternative` so clients without HTML fall back to plain text. |
+| [app/core/pipeline.py](app/core/pipeline.py) | `build_report()` wires the above together end-to-end; the only place that calls more than one module. `run()` adds the email side effect. |
 
 ## 4. Expected sheet shape
 
@@ -95,14 +104,19 @@ as-is including a sheet typo that's intentionally tolerated):
 | `Month` | Which monthly bucket a row belongs to (`MAY`, `JUNE`, `JULY`, …). |
 | `Quantity` | The unit count summed for every KPI/breakup metric. |
 | `Loading (Dispatched) Date` | A valid `DD-MM-YYYY` date that is on/before today **and** in the order's own month (or earlier) = dispatched/closed; blank, `Pending`, a future date, or a later-month date = still open. |
-| `Country` | Groups the overdue breakup. |
-| `over due days` | > 0 marks a row "overdue" for the breakup section. |
-| `Machine Revision Date` | Source for each country's "New Committed Date". |
-| `Container Placement date`, `Container Revision Date` | Source for "Container Expected Date" (latest of the two). |
-| `Vessel Cut-Off Date` | Shown as-is per country (latest among overdue rows). |
-| `no of times commitment changes(prod)` *(or the sheet's misspelling `commitement`)* | Summed as "Prdn commitment changes". |
-| `no of comm container changes` | Summed as "Container commitment changes". |
-| `Commercial Clearance Status` | Anything other than completed/complete/cleared/done/yes counts as pending. |
+| `Country` | Groups the breakup; one row per unique country. |
+| `commitment of loading date` | Blank or earlier than today = counted in "Over Due Breakup". |
+| `revision commitment of loading date` | Latest = each country's "New Committed Date"; earlier than today also counts toward "Pending Orders". |
+| `no of commitment loading  changes` | Averaged as "No of Days Delay from 1st Commitment". |
+| `Production Completion Date` | Blank = counted in "Prdn – No of machines" pending. |
+| `Machine Revision Date` | Earlier than today = counted in "Production Overdue". |
+| `Container Placement date` | Blank = "Container – No of machines" pending; latest = "Container Expected Date". |
+| `Container Revision Date` | Earlier than today = counted in "Container Overdue". |
+| `Vessel Cut-Off Date` | Shown as-is per country (latest). |
+| `no of times commitment changes(prod)` *(or the sheet's misspelling `commitement`)* | Averaged as "Prdn commitment changes". |
+| `no of comm container changes` | Averaged as "Container commitment changes". |
+| `Commercial Clearance Status` | Literally `Pending` or blank counts as clearance pending; anything else is cleared. |
+| `over due days` | Legacy column; retained but no longer drives the breakup KPIs. |
 
 Dates are parsed strictly as `DD-MM-YYYY` (`kpi_engine.DATE_FORMAT`); anything
 that doesn't match (blank, `"Pending"`, other formats) parses to `NaT` and is
@@ -141,37 +155,37 @@ month (per `MONTH_ORDER`) that actually appears in the sheet's `Month`
 column (case/whitespace-insensitive), falling back to the last configured
 month name if none match.
 
-### 5.2 Per-country overdue breakup
+### 5.2 Per-country breakup
 
 `compute_country_breakup(df, month)` — restricted to the target month if
-given, otherwise the whole sheet. For each `Country` group:
+given, otherwise the whole sheet. Follows the business-logic doc
+(`logic_docs/Export Kpi project.docx`) exactly: **every unique, non-blank
+`Country` produces one row** (there is no "drop countries with nothing
+outstanding" filter — the doc's "display all unique countries" is authoritative).
 
-- **Included at all** only if the country has at least one *open* row
-  (`Loading Date` not a valid date) or one *overdue* row (`over due days` >
-  0). Countries with everything dispatched and never overdue are dropped.
-  Blank/unlabeled country rows are also dropped.
-- `over_due_breakup` = `SUM(Quantity)` over that country's overdue rows.
-- `days_delay` = `MAX(over due days)` over that country's overdue rows (not a
-  sum — it's "how late is the worst row").
-- `new_committed_date` = latest `Machine Revision Date` among overdue rows.
-- `container_expected_date` = latest of `Container Placement date` /
-  `Container Revision Date` among overdue rows.
-- `vessel_cutoff` = latest `Vessel Cut-Off Date` among overdue rows.
-- `prdn_machines_pending` / `container_machines_pending` = `SUM(Quantity)`
-  over **all open rows** for that country (not just overdue ones) — today
-  these two are identical because the sheet has no separate "awaiting
-  production vs. awaiting container" distinction, but they're computed
-  independently so a future column split doesn't require new logic.
-- `prdn_commitment_changes` = `SUM(commitment changes (prod))` over overdue
-  rows. `container_commitment_changes` = `SUM(comm container changes)` over
-  overdue rows.
-- `clearance_pending` = `SUM(Quantity)` over **all rows** (not just overdue)
-  where `Commercial Clearance Status` isn't one of
-  `completed/complete/cleared/done/yes`.
+Each "count" KPI is expressed in **machines** = `SUM(Quantity)` over the rows
+matching that KPI's condition; each "commitment changes" KPI is an **average**
+of its change-count column across the country's rows:
 
-Countries are sorted **descending by `over_due_breakup`** (worst first). A
-"Sub Total" row is a plain column-wise sum of every numeric field across all
-countries (dates are never totaled).
+| Field | Doc KPI | Logic |
+|---|---|---|
+| `pending_orders` | Pending Orders | `SUM(Quantity)` where `Loading (Dispatched) Date` is blank **or** `revision commitment of loading date` is earlier than today. |
+| `over_due_breakup` | Overdue Breakup | `SUM(Quantity)` where `commitment of loading date` is blank or earlier than today. |
+| `days_delay` | Days Delay from 1st Commitment | `AVG(no of commitment loading changes)` over the country's rows. |
+| `new_committed_date` | New Committed Date | latest `revision commitment of loading date`. |
+| `container_expected_date` | Container Expected Date | latest `Container Placement date`. |
+| `prdn_machines_pending` | Prdn – No of machines | `SUM(Quantity)` where `Production Completion Date` is blank. |
+| `prdn_commitment_changes` | Prdn – Commitment Changes | `AVG(no of times commitment changes(prod))`. |
+| `prdn_overdue` | Production Overdue | `SUM(Quantity)` where `Machine Revision Date` is earlier than today. |
+| `container_machines_pending` | Container – No of machines | `SUM(Quantity)` where `Container Placement date` is blank. |
+| `container_commitment_changes` | Container – Commitment Changes | `AVG(no of comm container changes)`. |
+| `container_overdue` | Container Overdue | `SUM(Quantity)` where `Container Revision Date` is earlier than today. |
+| `vessel_cutoff` | Vessel Cut-Off | latest `Vessel Cut-Off Date`. |
+| `clearance_pending` | Commercial Clearance Pending | `SUM(Quantity)` where `Commercial Clearance Status` is literally `Pending` or blank. |
+
+Countries are sorted **descending by `over_due_breakup`** (worst first). The
+"Sub Total" row totals the count columns only (`_SUM_KEYS`); average and date
+columns are left blank because summing an average or a date isn't meaningful.
 
 Missing columns don't raise — `_col()` substitutes an all-blank column, so a
 country/date field contributes 0/"" rather than crashing the whole report if

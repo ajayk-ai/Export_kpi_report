@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.kpi_engine import compute_all_kpis, compute_country_breakup, latest_month
-from src.report import html_report, text_summary
+from app.core.kpi_engine import compute_all_kpis, compute_country_breakup, latest_month
+from app.core.report import html_report, text_summary
 
 DEFAULT_FILE = Path(__file__).resolve().parent / "data" / "test_data.xlsx"
 PREVIEW = Path(__file__).resolve().parent / "data" / "report_preview.html"
