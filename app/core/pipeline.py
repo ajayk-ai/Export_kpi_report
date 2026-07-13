@@ -47,13 +47,18 @@ def build_report(
         df = get_data_as_dataframe(settings.sheet_id, settings.worksheet_name)
 
     kpis = compute_all_kpis(df)
-    month = month or settings.report_month or latest_month(df)
-    breakup = compute_country_breakup(df, month=month)
+    # Label for the monthly-summary section and the email subject.
+    report_month = month or settings.report_month or latest_month(df)
+    # The per-country breakup spans ALL months by default: an order booked in a
+    # prior month can still be pending/overdue today, so scoping to one month
+    # would hide it. Pass an explicit `month` (or set REPORT_MONTH) to scope it.
+    breakup_month = month or settings.report_month or None  # None/"" -> all data
+    breakup = compute_country_breakup(df, month=breakup_month)
     ai_summary = generate_summary(kpis, breakup) if use_ai else ""
 
     text = text_summary(kpis, breakup, ai_summary)
-    html = html_report(kpis, breakup, ai_summary, month=month)
-    return ReportResult(month, kpis, breakup, ai_summary, text, html)
+    html = html_report(kpis, breakup, ai_summary, month=breakup_month)
+    return ReportResult(report_month, kpis, breakup, ai_summary, text, html)
 
 
 def run(send: bool = False, df: pd.DataFrame | None = None) -> str:

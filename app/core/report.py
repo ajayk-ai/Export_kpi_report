@@ -387,7 +387,7 @@ def html_report(
     {_breakup_section_html(breakup or [])}
     <div style="color:#9ca3af;font-size:12px;margin-top:18px;">
       Balance = Total Order − Despatched. Over Due Breakup and the commitment
-      columns are computed for {escape(month or "the latest month")}.
+      columns cover {escape(month) if month else "all months, as of today"}.
     </div>
   </div>
 </div>"""

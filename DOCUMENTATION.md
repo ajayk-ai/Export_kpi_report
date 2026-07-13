@@ -64,11 +64,17 @@ browser, and email always show the identical report:
 ```
 df = data_source.load(source)              # 'sheet' (default) or 'local'
 kpis = compute_all_kpis(df)
-month = month_override or REPORT_MONTH or latest_month(df)
-breakup = compute_country_breakup(df, month=month)
+report_month = month_override or REPORT_MONTH or latest_month(df)   # summary/subject label
+breakup = compute_country_breakup(df, month=month_override or REPORT_MONTH or None)
+                                           # None = ALL months (see §5.2)
 ai_summary = generate_summary(kpis, breakup)   # skipped when use_ai=False
--> ReportResult(month, kpis, breakup, ai_summary, text, html)
+-> ReportResult(report_month, kpis, breakup, ai_summary, text, html)
 ```
+
+The monthly summary is per-month, but the **breakup spans all months by
+default** — an order booked in a prior month can still be pending/overdue today,
+so scoping it to one month would hide it. Set `REPORT_MONTH` (or pass `month=`)
+only if you deliberately want a single-month breakup.
 
 Every function in `kpi_engine.py` is a **pure function over a DataFrame** —
 no I/O, no side effects — which is what makes the KPI math easy to reason
@@ -158,7 +164,9 @@ month name if none match.
 ### 5.2 Per-country breakup
 
 `compute_country_breakup(df, month)` — restricted to the target month if
-given, otherwise the whole sheet. Follows the business-logic doc
+given, otherwise **the whole sheet (all months)**, which is how the pipeline
+calls it by default so prior-month pending/overdue orders still surface.
+Follows the business-logic doc
 (`logic_docs/Export Kpi project.docx`) exactly: **every unique, non-blank
 `Country` produces one row** (there is no "drop countries with nothing
 outstanding" filter — the doc's "display all unique countries" is authoritative).
@@ -171,7 +179,7 @@ of its change-count column across the country's rows:
 |---|---|---|
 | `pending_orders` | Pending Orders | `SUM(Quantity)` where `Loading (Dispatched) Date` is blank **or** `revision commitment of loading date` is earlier than today. |
 | `over_due_breakup` | Overdue Breakup | `SUM(Quantity)` where `commitment of loading date` is blank or earlier than today. |
-| `days_delay` | Days Delay from 1st Commitment | `AVG(no of commitment loading changes)` over the country's rows. |
+| `days_delay` | Days Delay from 1st Commitment | `AVG(no of commitment loading changes)` over the country's rows (zeros included). |
 | `new_committed_date` | New Committed Date | latest `revision commitment of loading date`. |
 | `container_expected_date` | Container Expected Date | latest `Container Placement date`. |
 | `prdn_machines_pending` | Prdn – No of machines | `SUM(Quantity)` where `Production Completion Date` is blank. |
