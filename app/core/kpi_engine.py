@@ -5,8 +5,8 @@ import pandas as pd
 
 MONTH_ORDER = ["MAY", "JUNE", "JULY"]  # extend as needed
 
-# Month name -> calendar number, used to tell whether a dispatch slipped into a
-# later month than the order's own Month bucket (see _is_dispatched).
+# Month name -> calendar number, used to tell which calendar month a Loading
+# (Dispatched) Date actually falls in (see _is_dispatched_in_month).
 MONTH_NUM = {
     "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4, "MAY": 5, "JUNE": 6,
     "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11,
@@ -15,7 +15,6 @@ MONTH_NUM = {
 
 # Raw sheet column headers (SCM_Export tab, columns A–T). Kept here so a header
 # rename in the sheet is a one-line fix.
-COL_MONTH = "Month"
 COL_COUNTRY = "Country"
 COL_QUANTITY = "Quantity"
 COL_MACHINE_REVISION = "Machine Revision Date"
@@ -65,13 +64,12 @@ def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> d
 
     total_order = opening_order + new_order
 
-    # Despatched = order lines in the month that have really shipped for their
-    # month (a loading date in this month or earlier; a later-month date is still
-    # pending). These rows are a subset of the month's rows, so dispatched <=
-    # new_order, which keeps balance (open orders) at zero or positive.
-    dispatched_mask = in_month & _is_dispatched(
-        _col(df, COL_LOADING_DATE), _col(df, COL_MONTH)
-    )
+    # Despatched = every order line whose Loading (Dispatched) Date actually
+    # falls in this month — regardless of which month the order was originally
+    # booked in. Orders carry forward from a prior month's Balance and often
+    # ship later than their own Month bucket, so despatch has to be attributed
+    # to the month it really happened in, not the order's booking month.
+    dispatched_mask = _is_dispatched_in_month(_col(df, COL_LOADING_DATE), month)
     dispatched = int(qty[dispatched_mask].sum())
 
     balance = total_order - dispatched
@@ -128,29 +126,30 @@ def _to_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(0)
 
 
-def _is_dispatched(loading: pd.Series, months: pd.Series) -> pd.Series:
-    """True only where the order has really shipped.
+def _is_dispatched_in_month(loading: pd.Series, month: str) -> pd.Series:
+    """True where the row's Loading (Dispatched) Date actually falls in ``month``.
 
     A dispatch counts when the loading cell holds a real date (day-first
     ``DD-MM-YYYY``) that is BOTH:
 
     * on or before today — a load date in the future hasn't shipped yet; and
-    * in the order's ``Month`` bucket or earlier — a date in a *later* month than
-      the bucket is a dispatch that slipped past its month.
+    * in the calendar month being reported on — regardless of which month the
+      order was originally booked in, since carry-forward orders routinely ship
+      later than their own Month bucket.
 
-    Anything else is still pending/open: a blank cell, the literal ``Pending``, a
-    future-dated load, or a later-month load. (Buckets carry no year, so the month
-    numbers are compared within the loading date's own year, which is what the
-    single-year reporting window needs.)
+    Anything else doesn't count towards this month's Despatched: a blank cell,
+    the literal ``Pending``, a future-dated load, or a load that happened in a
+    different month. (No year is stored anywhere, so the month numbers are
+    compared within the loading date's own year, which is what the single-year
+    reporting window needs.)
     """
     loaded = pd.to_datetime(loading, format=DATE_FORMAT, errors="coerce")
-    bucket = months.astype(str).str.strip().str.upper().map(MONTH_NUM)
-    # not_slipped is False for a later-month dispatch; unknown bucket names fall
-    # back to "any real date counts", preserving the old behaviour.
-    not_slipped = (loaded.dt.month <= bucket) | bucket.isna()
-    # not_future is False for a load date after today (still to happen).
+    target = MONTH_NUM.get(month.strip().upper())
+    if target is None:
+        return pd.Series(False, index=loading.index)
+    in_target_month = loaded.dt.month == target
     not_future = loaded <= pd.Timestamp(date.today())
-    return loaded.notna() & not_slipped & not_future
+    return loaded.notna() & in_target_month & not_future
 
 
 def _clearance_pending(series: pd.Series) -> pd.Series:

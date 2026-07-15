@@ -44,7 +44,7 @@ Five numbers per month:
 | **Opening Order** | Orders still owed to customers at the *start* of the month — i.e. whatever was left over (Balance) from the previous month. |
 | **New Order** | Brand-new orders (Order Type = `N`) placed *during* this month. |
 | **Total Order** | Opening Order + New Order — everything we owe customers this month. |
-| **Despatched** | Orders that actually shipped (have a real Loading/Dispatched Date) during this month. |
+| **Despatched** | Orders whose Loading/Dispatched Date falls during this month — whichever month they actually shipped in, even if they were booked (or carried forward) in an earlier month. |
 | **Balance** | Total Order − Despatched — what's still owed at month end. This becomes next month's Opening Order. |
 
 ### Worked example
@@ -168,6 +168,11 @@ pending"), even though none of them are late yet.
 **Why doesn't "Balance" match what I expect from just this month's rows?**
 Balance is cumulative — it carries forward everything unshipped from every
 prior month, not just this month's new orders.
+
+**An order was booked last month but only shipped this month — where does it show up?**
+As Despatched *this* month, not the month it was booked in. Despatched is
+based on the actual Loading/Dispatched Date, so a carry-forward order reduces
+Balance in the month it really ships, instead of sitting in Balance forever.
 
 **A row's Order Type isn't "N" — where does it show up?**
 It's counted as Despatched if it ships in that month, and it feeds Balance

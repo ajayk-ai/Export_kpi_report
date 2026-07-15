@@ -109,7 +109,7 @@ as-is including a sheet typo that's intentionally tolerated):
 |---|---|
 | `Month` | Which monthly bucket a row belongs to (`MAY`, `JUNE`, `JULY`, …). |
 | `Quantity` | The unit count summed for every KPI/breakup metric. |
-| `Loading (Dispatched) Date` | A valid `DD-MM-YYYY` date that is on/before today **and** in the order's own month (or earlier) = dispatched/closed; blank, `Pending`, a future date, or a later-month date = still open. |
+| `Loading (Dispatched) Date` | A valid `DD-MM-YYYY` date that is on/before today = dispatched, attributed to **whichever calendar month the date itself falls in** (not necessarily the order's own `Month` bucket — carry-forward orders often ship later); blank, `Pending`, or a future date = still open. |
 | `Country` | Groups the breakup; one row per unique country. |
 | `commitment of loading date` | Blank or earlier than today = counted in "Over Due Breakup". |
 | `revision commitment of loading date` | Latest = each country's "New Committed Date"; earlier than today also counts toward "Pending Orders". |
@@ -136,11 +136,12 @@ treated as "not a real date" — e.g. not dispatched.
 
 ```
 opening_order  = prev_balance                                   # carried from previous month
-new_order      = SUM(Quantity) WHERE Month == month             # every order line in the month
+new_order      = SUM(Quantity) WHERE Month == month             # every order line booked in the month
 total_order    = opening_order + new_order
-dispatched     = SUM(Quantity) WHERE Month == month AND Loading Date is a real date
-                                     that is on/before today AND in this month or earlier
-                                     # a future-dated OR later-month load = still pending
+dispatched     = SUM(Quantity) WHERE Loading Date is a real date, on/before today,
+                                     AND falls in this calendar month
+                                     # regardless of the row's own Month bucket —
+                                     # a carry-forward order ships later than it was booked
 balance        = total_order - dispatched                       # = open orders still pending dispatch
 ```
 
@@ -151,10 +152,14 @@ month). To add a new month, extend `MONTH_ORDER` — nothing else needs to
 change.
 
 An order is "open" when its `Loading (Dispatched) Date` is blank/`Pending`;
-`balance` is exactly those still-open units. Because the dispatched rows are a
-subset of the month's rows, `dispatched <= new_order`, so `balance` (and the
-`opening_order` it feeds) can never go negative. There is no longer an
-`Order Type (N / O)` column — every line is counted in the month it belongs to.
+`balance` is exactly those still-open units. `Despatched` is keyed off the
+Loading Date's own month, not the row's `Month` bucket, so a carry-forward
+order dispatched in a later month reduces *that* month's balance rather than
+sitting uncounted forever. Because dispatch is attributed by actual ship date,
+`dispatched` is no longer guaranteed `<= new_order`; `balance` can dip negative
+if more ships in a month than was owed (old backlog clearing out) — the report
+highlights that case. There is no longer an `Order Type (N / O)` column —
+every line is counted in the month it belongs to.
 
 `latest_month(df)` — used when `REPORT_MONTH` is blank — returns the last
 month (per `MONTH_ORDER`) that actually appears in the sheet's `Month`
