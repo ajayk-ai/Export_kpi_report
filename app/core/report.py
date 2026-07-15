@@ -220,11 +220,11 @@ def _num(value: int, *, blank_zero: bool = True) -> str:
 
 
 def _avg_num(value: float) -> str:
-    """An average for a data cell — one decimal, blank instead of 0."""
-    v = round(float(value), 1)
+    """An average for a data cell — whole number, blank instead of 0."""
+    v = round(float(value))
     if v == 0:
         return ""
-    return f"{v:g}"
+    return str(v)
 
 
 def _parse_date(value: str):

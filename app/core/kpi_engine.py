@@ -245,9 +245,9 @@ def compute_country_breakup(
         def machines(mask: pd.Series, _rows: pd.Series = rows) -> int:
             return int(qty[_rows & mask].sum())
 
-        def average(series: pd.Series, _rows: pd.Series = rows) -> float:
+        def average(series: pd.Series, _rows: pd.Series = rows) -> int:
             vals = series[_rows]
-            return round(float(vals.mean()), 1) if len(vals) else 0.0
+            return round(float(vals.mean())) if len(vals) else 0
 
         results.append(
             {
