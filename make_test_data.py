@@ -14,6 +14,7 @@ Run:
                                                # (clears the target worksheet first!)
 """
 import argparse
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -30,8 +31,8 @@ COLUMNS = [
     "Quantity",
     "Serial Number",
     "FOB Price",
-    "Machine Readiness Date",
-    "Machine Revision Date",                 # past -> Production Overdue
+    "production commitment Date",
+    "production commitment Revise Date",     # past -> Production Overdue
     "no of times commitment changes(prod)",  # -> Prdn commitment changes (avg)
     "Production Completion Date",             # blank -> Prdn machines pending
     "backlog days",
@@ -83,8 +84,8 @@ def _row(month, country, model, qty, *, readiness="", machine_revision="",
         "Quantity": qty,
         "Serial Number": "",  # filled sequentially in build_dataframe
         "FOB Price": fob,
-        "Machine Readiness Date": readiness,
-        "Machine Revision Date": machine_revision,
+        "production commitment Date": readiness,
+        "production commitment Revise Date": machine_revision,
         "no of times commitment changes(prod)": prdn_changes,
         "Production Completion Date": production_completion,
         "backlog days": backlog,
@@ -102,9 +103,15 @@ def _row(month, country, model, qty, *, readiness="", machine_revision="",
     }
 
 
+def _days_before(date_str: str, days: int) -> str:
+    """``date_str`` (DD-MM-YYYY) shifted back by ``days`` days."""
+    return (datetime.strptime(date_str, "%d-%m-%Y") - timedelta(days=days)).strftime("%d-%m-%Y")
+
+
 def _shipped(month, country, model, qty, loading):
     """A clean, fully-dispatched line (only feeds the monthly summary)."""
     return _row(month, country, model, qty, loading=loading,
+                readiness=_days_before(loading, 5),
                 production_completion=loading, container_placement=loading,
                 commitment_loading="31-12-2026", clearance="Completed")
 
@@ -114,7 +121,7 @@ def _shipped(month, country, model, qty, loading):
 # --------------------------------------------------------------------------- #
 ROWS = [
     # ===== MAY: shipped baseline; one open line carries forward ==============
-    _row("MAY", "BRAZIL", "B45", 8, loading="", clearance="Pending"),  # open -> carries
+    _row("MAY", "BRAZIL", "B45", 8, loading="", readiness="05-05-2026", clearance="Pending"),  # open -> carries
     _shipped("MAY", "USA", "X200", 20, "10-05-2026"),
     _shipped("MAY", "GERMANY", "G90", 15, "12-05-2026"),
     _shipped("MAY", "INDIA", "H70", 10, "18-05-2026"),
@@ -131,8 +138,8 @@ ROWS = [
     _shipped("MAY", "VIETNAM", "J60", 4, "27-05-2026"),
 
     # ===== JUNE: mostly shipped, two carry forward ===========================
-    _row("JUNE", "GERMANY", "G90", 7, loading=""),   # open -> carries
-    _row("JUNE", "BRAZIL", "B45", 6, loading=""),    # open -> carries
+    _row("JUNE", "GERMANY", "G90", 7, loading="", readiness="24-06-2026"),   # open -> carries
+    _row("JUNE", "BRAZIL", "B45", 6, loading="", readiness="26-06-2026"),    # open -> carries
     _shipped("JUNE", "USA", "X200", 18, "09-06-2026"),
     _shipped("JUNE", "KENYA", "K30", 12, "15-06-2026"),
     _shipped("JUNE", "JAPAN", "J55", 9, "20-06-2026"),
@@ -153,13 +160,13 @@ ROWS = [
     _row("JULY", "USA", "X200", 10, loading="", commitment_loading="26-06-2026",
          loading_changes=6, revision_commitment_loading="10-07-2026",
          production_completion="", prdn_changes=30, machine_revision="05-07-2026",
-         container_placement="08-07-2026", container_changes=25,
+         readiness="28-06-2026", container_placement="08-07-2026", container_changes=25,
          container_revision="06-07-2026", vessel="14-07-2026",
          overdue_days=17, clearance="Pending"),
     _row("JULY", "USA", "X250", 6, loading="", commitment_loading="28-06-2026",
          loading_changes=8, revision_commitment_loading="16-07-2026",
          production_completion="", prdn_changes=40, machine_revision="20-07-2026",
-         container_placement="", container_changes=21,
+         readiness="30-06-2026", container_placement="", container_changes=21,
          container_revision="25-07-2026", vessel="30-07-2026",
          overdue_days=15, clearance="Completed"),
 
@@ -168,14 +175,14 @@ ROWS = [
          commitment_loading="25-07-2026", loading_changes=0,
          revision_commitment_loading="", production_completion="10-07-2026",
          prdn_changes=0, machine_revision="30-07-2026",
-         container_placement="22-07-2026", container_changes=0,
+         readiness="15-07-2026", container_placement="22-07-2026", container_changes=0,
          container_revision="24-07-2026", vessel="28-07-2026", clearance="Completed"),
 
     # INDIA: commitment blank (overdue), container placement blank (container pending).
     _row("JULY", "INDIA", "H70", 8, loading="", commitment_loading="",
          loading_changes=3, revision_commitment_loading="12-07-2026",
          production_completion="09-07-2026", prdn_changes=5, machine_revision="",
-         container_placement="", container_changes=4,
+         readiness="01-07-2026", container_placement="", container_changes=4,
          container_revision="10-07-2026", vessel="15-07-2026",
          overdue_days=6, clearance=""),
 
@@ -184,7 +191,7 @@ ROWS = [
          commitment_loading="07-07-2026", loading_changes=4,
          revision_commitment_loading="11-07-2026", production_completion="",
          prdn_changes=12, machine_revision="08-07-2026",
-         container_placement="07-07-2026", container_changes=9,
+         readiness="03-07-2026", container_placement="07-07-2026", container_changes=9,
          container_revision="09-07-2026", vessel="25-07-2026",
          overdue_days=6, clearance="Pending"),
 
@@ -193,20 +200,20 @@ ROWS = [
          commitment_loading="20-07-2026", loading_changes=1,
          revision_commitment_loading="", production_completion="11-07-2026",
          prdn_changes=2, machine_revision="22-07-2026",
-         container_placement="19-07-2026", container_changes=1,
+         readiness="12-07-2026", container_placement="19-07-2026", container_changes=1,
          container_revision="21-07-2026", vessel="26-07-2026", clearance="Pending"),
 
     # KENYA: worst case — >5 machines pending on both prod & container (red rules).
     _row("JULY", "KENYA", "K30", 9, loading="", commitment_loading="01-07-2026",
          loading_changes=5, revision_commitment_loading="05-07-2026",
          production_completion="", prdn_changes=20, machine_revision="03-07-2026",
-         container_placement="", container_changes=15,
+         readiness="25-06-2026", container_placement="", container_changes=15,
          container_revision="02-07-2026", vessel="12-07-2026",
          overdue_days=12, clearance="Pending"),
     _row("JULY", "KENYA", "K35", 4, loading="", commitment_loading="03-07-2026",
          loading_changes=7, revision_commitment_loading="14-07-2026",
          production_completion="", prdn_changes=26, machine_revision="06-07-2026",
-         container_placement="", container_changes=19,
+         readiness="28-06-2026", container_placement="", container_changes=19,
          container_revision="04-07-2026", vessel="16-07-2026",
          overdue_days=10, clearance="Pending"),
 
@@ -214,13 +221,14 @@ ROWS = [
     _row("JULY", "MEXICO", "Z100", 9, loading="", commitment_loading="04-07-2026",
          loading_changes=2, revision_commitment_loading="13-07-2026",
          production_completion="", prdn_changes=8, machine_revision="07-07-2026",
-         container_placement="06-07-2026", container_changes=6,
+         readiness="29-06-2026", container_placement="06-07-2026", container_changes=6,
          container_revision="08-07-2026", vessel="20-07-2026",
          overdue_days=9, clearance="Pending"),
     _row("JULY", "MEXICO", "X250", 4, loading="", commitment_loading="02-07-2026",
          loading_changes=4, revision_commitment_loading="15-07-2026",
          production_completion="10-07-2026", prdn_changes=10,
-         machine_revision="09-07-2026", container_placement="05-07-2026",
+         machine_revision="09-07-2026", readiness="27-06-2026",
+         container_placement="05-07-2026",
          container_changes=8, container_revision="07-07-2026", vessel="18-07-2026",
          overdue_days=11, clearance="Pending"),
 
@@ -229,20 +237,20 @@ ROWS = [
          commitment_loading="24-07-2026", loading_changes=1,
          revision_commitment_loading="", production_completion="10-07-2026",
          prdn_changes=0, machine_revision="28-07-2026",
-         container_placement="23-07-2026", container_changes=0,
+         readiness="18-07-2026", container_placement="23-07-2026", container_changes=0,
          container_revision="26-07-2026", vessel="29-07-2026", clearance="Completed"),
 
     # PERU: overdue + container pending, clearance blank, across two lines.
     _row("JULY", "PERU", "K35", 8, loading="", commitment_loading="30-06-2026",
          loading_changes=5, revision_commitment_loading="12-07-2026",
          production_completion="09-07-2026", prdn_changes=3, machine_revision="",
-         container_placement="", container_changes=7,
+         readiness="20-06-2026", container_placement="", container_changes=7,
          container_revision="10-07-2026", vessel="15-07-2026",
          overdue_days=13, clearance=""),
     _row("JULY", "PERU", "K30", 5, loading="", commitment_loading="29-06-2026",
          loading_changes=6, revision_commitment_loading="11-07-2026",
          production_completion="", prdn_changes=9, machine_revision="05-07-2026",
-         container_placement="", container_changes=5,
+         readiness="22-06-2026", container_placement="", container_changes=5,
          container_revision="03-07-2026", vessel="14-07-2026",
          overdue_days=14, clearance="Pending"),
 
@@ -250,13 +258,13 @@ ROWS = [
     _row("JULY", "EGYPT", "G120", 10, loading="", commitment_loading="25-06-2026",
          loading_changes=6, revision_commitment_loading="15-07-2026",
          production_completion="", prdn_changes=22, machine_revision="05-07-2026",
-         container_placement="07-07-2026", container_changes=18,
+         readiness="18-06-2026", container_placement="07-07-2026", container_changes=18,
          container_revision="06-07-2026", vessel="14-07-2026",
          overdue_days=18, clearance="Pending"),
     _row("JULY", "EGYPT", "H80", 3, loading="", commitment_loading="27-06-2026",
          loading_changes=4, revision_commitment_loading="14-07-2026",
          production_completion="", prdn_changes=16, machine_revision="08-07-2026",
-         container_placement="", container_changes=12,
+         readiness="20-06-2026", container_placement="", container_changes=12,
          container_revision="09-07-2026", vessel="16-07-2026",
          overdue_days=16, clearance="Pending"),
 
@@ -265,7 +273,7 @@ ROWS = [
          commitment_loading="22-07-2026", loading_changes=0,
          revision_commitment_loading="", production_completion="",
          prdn_changes=9, machine_revision="08-07-2026",
-         container_placement="20-07-2026", container_changes=2,
+         readiness="01-07-2026", container_placement="20-07-2026", container_changes=2,
          container_revision="21-07-2026", vessel="27-07-2026", clearance="Completed"),
 
     # VIETNAM: past-shipped but overdue, both prod & container overdue.
@@ -273,7 +281,7 @@ ROWS = [
          commitment_loading="06-07-2026", loading_changes=4,
          revision_commitment_loading="11-07-2026", production_completion="",
          prdn_changes=14, machine_revision="09-07-2026",
-         container_placement="05-07-2026", container_changes=11,
+         readiness="28-06-2026", container_placement="05-07-2026", container_changes=11,
          container_revision="07-07-2026", vessel="24-07-2026",
          overdue_days=7, clearance="Pending"),
 
@@ -282,14 +290,14 @@ ROWS = [
          commitment_loading="20-07-2026", loading_changes=1,
          revision_commitment_loading="", production_completion="11-07-2026",
          prdn_changes=2, machine_revision="23-07-2026",
-         container_placement="19-07-2026", container_changes=1,
+         readiness="14-07-2026", container_placement="19-07-2026", container_changes=1,
          container_revision="22-07-2026", vessel="26-07-2026", clearance="Pending"),
 
     # CANADA: blank commitment (overdue), container pending.
     _row("JULY", "CANADA", "X200", 8, loading="", commitment_loading="",
          loading_changes=3, revision_commitment_loading="12-07-2026",
          production_completion="", prdn_changes=10, machine_revision="06-07-2026",
-         container_placement="", container_changes=5,
+         readiness="26-06-2026", container_placement="", container_changes=5,
          container_revision="09-07-2026", vessel="16-07-2026",
          overdue_days=8, clearance="Pending"),
 ]

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(d:/11326/Downloads/Export-kpi-automation/.venv/Scripts/python.exe -c ' *)"
+    ]
+  }
+}

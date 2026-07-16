@@ -28,7 +28,8 @@ biggest risk in a few sentences.
 | `Loading (Dispatched) Date` | The date the order actually left / was loaded for shipment. If this cell is blank or says "Pending", the order **has not shipped yet**. |
 | `Country` | Which country/dealer's order this is — used to group the overdue table. |
 | `over due days` | How many days past the original commitment this order currently is. `0` (or blank) = not overdue. |
-| `Machine Revision Date` | The latest revised production commitment date for that order. Shown as "New Committed Date". |
+| `Production Commitment Date` | When the machine was originally due to be ready. Used, for a country's overdue orders, to work out "No of Days Delay from 1st Commitment". |
+| `Production Commitment Revise Date` | The latest revised production commitment date for that order. Shown as "New Committed Date". |
 | `Container Placement date` / `Container Revision Date` | When the container is expected — whichever of the two is later. Shown as "Container Expected Date". |
 | `Vessel Cut-Off Date` | The shipping line's cut-off date for that order's vessel. |
 | `no of times commitment changes(prod)` | How many times the factory has pushed back its production commitment for that order. |
@@ -99,37 +100,39 @@ shipped** or **overdue**.
 | Column | Plain-language meaning |
 |---|---|
 | **Over Due Breakup** | Total quantity of that country's orders that are currently overdue (`over due days` > 0). |
-| **No of Days Delay from 1st Commitment** | The single worst delay among that country's overdue orders (the maximum, not an average). |
+| **No of Days Delay from 1st Commitment** | Among that country's overdue orders, the oldest `Production Commitment Date` vs. today — the single worst delay, not an average. |
 | **New Committed Date** | The latest revised production date given to that country's overdue orders. |
 | **Container Expected Date** | The latest expected container date for those overdue orders. |
-| **Prdn Commitment → No of machines pending** | Quantity of that country's orders (overdue or not) that haven't shipped yet. |
+| **Prdn Commitment → No of machines pending** | Quantity where the machine has no readiness date yet, or its readiness date has been superseded by a revised production date (`Production Commitment Revise Date`) that's also now overdue. |
 | **Prdn Commitment → No of commitment changes** | How many times the factory pushed back its commitment on that country's overdue orders, added up. |
-| **Container Commitment → No of machines pending** | Same as production pending, from the container side (today these two numbers are usually identical). |
+| **Container Commitment → No of machines pending** | Quantity where the container has no placement date yet, or its placement date has passed with no revised container date given yet either. Once a revised date is given, that order is tracked under Container Overdue instead. |
 | **Container Commitment → No of commitment changes** | How many times the container date changed on that country's overdue orders, added up. |
-| **Vessel Cut Off** | The latest vessel cut-off date among that country's overdue orders. |
-| **Commercial Clearance Pending** | Quantity of that country's orders (overdue or not) where customs/export clearance isn't done yet. |
+| **Vessel Cut Off** | The earliest (nearest) vessel cut-off date among that country's overdue orders. |
+| **Commercial Clearance no of Pending** | Quantity of that country's orders (overdue or not) where customs/export clearance isn't done yet. |
 | **Sub Total row** | Straight column sum across every country. Dates are never summed. |
 
 Countries are listed worst-first (highest Over Due Breakup at the top).
 
 ### Worked example
 
-For June, suppose these are the only rows:
+For June (assume today is 22-06-2026), suppose these are the only rows:
 
-| Country | Quantity | over due days | Loading Date | Clearance Status |
+| Country | Quantity | Production Commitment Date | Loading Date | Clearance Status |
 |---|---|---|---|---|
-| UAE | 6 | 12 | *(blank)* | Pending |
-| UAE | 4 | 0  | 10-06-2026 | Completed |
-| Kenya | 3 | 20 | *(blank)* | *(blank)* |
+| UAE | 6 | 10-06-2026 | *(blank)* | Pending |
+| UAE | 4 | 18-06-2026 | 10-06-2026 | Completed |
+| Kenya | 3 | 02-06-2026 | *(blank)* | *(blank)* |
 
-- **UAE**: has one overdue row (qty 6, 12 days late) and one on-time,
-  shipped row. Over Due Breakup = **6**. Days Delay = **12**. Machines
-  pending (both prod & container) = 6 (only the un-shipped row). Clearance
-  Pending = 6 (the un-shipped row's status is "Pending"; the shipped row is
-  "Completed" so it doesn't count).
+- **UAE**: has one overdue row (qty 6, Production Commitment Date 10-06-2026)
+  and one on-time, shipped row. Over Due Breakup = **6**. Days Delay = **12**
+  (22-06 minus 10-06, from the one overdue row — the shipped row isn't
+  overdue so its date doesn't count). Machines pending (both prod &
+  container) = 6 (only the un-shipped row). Clearance Pending = 6 (the
+  un-shipped row's status is "Pending"; the shipped row is "Completed" so it
+  doesn't count).
 - **Kenya**: one overdue, unshipped row. Over Due Breakup = **3**. Days
-  Delay = **20**. Machines pending = 3. Clearance Pending = 3 (blank status
-  counts as pending).
+  Delay = **20** (22-06 minus 02-06). Machines pending = 3. Clearance
+  Pending = 3 (blank status counts as pending).
 
 Kenya is worse on delay (20 days) but UAE has the bigger overdue quantity, so
 UAE is listed first (sorted by quantity, not by days late).

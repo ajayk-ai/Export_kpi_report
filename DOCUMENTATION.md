@@ -113,12 +113,11 @@ as-is including a sheet typo that's intentionally tolerated):
 | `Country` | Groups the breakup; one row per unique country. |
 | `commitment of loading date` | Blank or earlier than today = counted in "Over Due Breakup". |
 | `revision commitment of loading date` | Latest = each country's "New Committed Date"; earlier than today also counts toward "Pending Orders". |
-| `no of commitment loading  changes` | Averaged as "No of Days Delay from 1st Commitment". |
-| `Production Completion Date` | Blank = counted in "Prdn – No of machines" pending. |
-| `Machine Revision Date` | Earlier than today = counted in "Production Overdue". |
-| `Container Placement date` | Blank = "Container – No of machines" pending; latest = "Container Expected Date". |
-| `Container Revision Date` | Earlier than today = counted in "Container Overdue". |
-| `Vessel Cut-Off Date` | Shown as-is per country (latest). |
+| `Production Commitment Date` | Among a country's overdue rows, the oldest one vs. today (in days) = "No of Days Delay from 1st Commitment". Blank, or given but superseded by an overdue `Production Commitment Revise Date`, = counted in "Prdn – No of machines" pending. |
+| `Production Commitment Revise Date` | Earlier than today = counted in "Production Overdue" **and**, if `Production Commitment Date` is also given, in "Prdn – No of machines" pending. |
+| `Container Placement date` | Blank, or given but overdue with no `Container Revision Date` set yet, = counted in "Container – No of machines" pending; latest = "Container Expected Date". |
+| `Container Revision Date` | Earlier than today = counted in "Container Overdue". Once set, the row stops counting toward "Container – No of machines" pending even if `Container Placement date` is overdue. |
+| `Vessel Cut-Off Date` | Shown as-is per country (earliest). |
 | `no of times commitment changes(prod)` *(or the sheet's misspelling `commitement`)* | Averaged as "Prdn commitment changes". |
 | `no of comm container changes` | Averaged as "Container commitment changes". |
 | `Commercial Clearance Status` | Literally `Pending` or blank counts as clearance pending; anything else is cleared. |
@@ -184,17 +183,17 @@ of its change-count column across the country's rows:
 |---|---|---|
 | `pending_orders` | Pending Orders | `SUM(Quantity)` where `Loading (Dispatched) Date` is blank **or** `revision commitment of loading date` is earlier than today. |
 | `over_due_breakup` | Overdue Breakup | `SUM(Quantity)` where `commitment of loading date` is blank or earlier than today. |
-| `days_delay` | Days Delay from 1st Commitment | `AVG(no of commitment loading changes)` over the country's rows (zeros included). |
+| `days_delay` | Days Delay from 1st Commitment | Among the country's overdue rows (`over_due_breakup` mask), the oldest `Production Commitment Date` vs. today, in days — the single worst delay, not an average. 0 if none of those rows has a real date. |
 | `new_committed_date` | New Committed Date | latest `revision commitment of loading date`. |
 | `container_expected_date` | Container Expected Date | latest `Container Placement date`. |
-| `prdn_machines_pending` | Prdn – No of machines | `SUM(Quantity)` where `Production Completion Date` is blank. |
+| `prdn_machines_pending` | Prdn – No of machines | `SUM(Quantity)` where `Production Commitment Date` is blank **or** `Production Commitment Revise Date` is earlier than today (same blank-or-revised-is-late shape as `pending_orders`). |
 | `prdn_commitment_changes` | Prdn – Commitment Changes | `AVG(no of times commitment changes(prod))`. |
-| `prdn_overdue` | Production Overdue | `SUM(Quantity)` where `Machine Revision Date` is earlier than today. |
-| `container_machines_pending` | Container – No of machines | `SUM(Quantity)` where `Container Placement date` is blank. |
+| `prdn_overdue` | Production Overdue | `SUM(Quantity)` where `Production Commitment Revise Date` is earlier than today. |
+| `container_machines_pending` | Container – No of machines | `SUM(Quantity)` where `Container Placement date` is blank, **or** it's overdue and `Container Revision Date` is still blank (once a revision date is set, the row is tracked via `container_overdue` instead). |
 | `container_commitment_changes` | Container – Commitment Changes | `AVG(no of comm container changes)`. |
 | `container_overdue` | Container Overdue | `SUM(Quantity)` where `Container Revision Date` is earlier than today. |
-| `vessel_cutoff` | Vessel Cut-Off | latest `Vessel Cut-Off Date`. |
-| `clearance_pending` | Commercial Clearance Pending | `SUM(Quantity)` where `Commercial Clearance Status` is literally `Pending` or blank. |
+| `vessel_cutoff` | Vessel Cut-Off | earliest `Vessel Cut-Off Date`. |
+| `clearance_pending` | Commercial Clearance no of Pending | `SUM(Quantity)` where `Commercial Clearance Status` is literally `Pending` or blank. |
 
 Countries are sorted **descending by `over_due_breakup`** (worst first). The
 "Sub Total" row totals the count columns only (`_SUM_KEYS`); average and date

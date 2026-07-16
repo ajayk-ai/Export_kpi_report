@@ -278,12 +278,11 @@ def _breakup_rows_html(breakup: list[dict]) -> str:
     rows = []
     for i, b in enumerate(breakup):
         bg = _ROW_ALT if i % 2 else "#ffffff"
-        over = int(b["over_due_breakup"])
+        over = int(b["pending_orders"])
         over_color = _NEG if over > 0 else "#1f2937"
         rows.append(
             f'<tr style="background:{bg};">'
             f'<td style="{_TD_LEFT}">{escape(b["country"])}</td>'
-            f'<td style="{_TD}">{_num(b["pending_orders"])}</td>'
             f'<td style="{_TD}font-weight:700;color:{over_color};">{_over_due_cell(b["country"], over)}</td>'
             f'<td style="{_TD}{_days_delay_style(b["days_delay"])}">{_avg_num(b["days_delay"])}</td>'
             f'<td style="{_TD}{_missed_date_style(b["new_committed_date"])}">{escape(b["new_committed_date"])}</td>'
@@ -307,8 +306,7 @@ def _breakup_subtotal_html(breakup: list[dict]) -> str:
     return (
         f"<tr>"
         f'<td style="{_TD_LEFT}background:{_HDR_YELLOW};">Sub Total</td>'
-        f'<td style="{sub_td}">{t["pending_orders"]}</td>'
-        f'<td style="{sub_td}color:{_NEG};">{t["over_due_breakup"]}</td>'
+        f'<td style="{sub_td}color:{_NEG};">{t["pending_orders"]}</td>'
         f'<td style="{sub_td}"></td>'  # Days Delay (average, not summed)
         f'<td style="{sub_td}"></td>'  # New Committed Date (dates don't total)
         f'<td style="{sub_td}"></td>'  # Container Expected Date
@@ -336,12 +334,11 @@ def _breakup_section_html(breakup: list[dict]) -> str:
     <table style="border-collapse:collapse;font-family:Segoe UI,Roboto,Arial,sans-serif;">
       <thead>
         <tr>
-          <th colspan="6" style="{yellow_banner}">{_report_date()}</th>
+          <th colspan="5" style="{yellow_banner}">{_report_date()}</th>
           <th colspan="8" style="{pink_banner}">Commitment not Given - Over Due days</th>
         </tr>
         <tr>
           <th rowspan="2" style="{y}text-align:left;">Breakup - Dealer / Customer</th>
-          <th rowspan="2" style="{y}">Pending Orders</th>
           <th rowspan="2" style="{y}">Over Due Breakup</th>
           <th rowspan="2" style="{y}">No of Days Delay from 1st Committment</th>
           <th rowspan="2" style="{y}">New Committed Date</th>
@@ -349,7 +346,7 @@ def _breakup_section_html(breakup: list[dict]) -> str:
           <th colspan="3" style="{p}">Prdn Committment Pending</th>
           <th colspan="3" style="{p}">Container Committment Pending</th>
           <th rowspan="2" style="{p}">Vessel Cut off</th>
-          <th rowspan="2" style="{p}">Commerical Clearance Pending</th>
+          <th rowspan="2" style="{p}">Commerical Clearance no of Pending</th>
         </tr>
         <tr>
           <th style="{p}">No of machines</th>

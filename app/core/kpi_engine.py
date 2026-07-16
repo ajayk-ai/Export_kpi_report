@@ -17,7 +17,8 @@ MONTH_NUM = {
 # rename in the sheet is a one-line fix.
 COL_COUNTRY = "Country"
 COL_QUANTITY = "Quantity"
-COL_MACHINE_REVISION = "Machine Revision Date"
+COL_MACHINE_REVISION = "production commitment Revise Date"
+COL_MACHINE_READINESS = "production commitment Date"             # -> Days Delay from 1st Commitment
 # The sheet header is misspelled ("commitement"); accept both spellings so this
 # keeps working if the typo is ever corrected.
 COL_PRDN_CHANGES = (
@@ -34,12 +35,6 @@ COL_CLEARANCE_STATUS = "Commercial Clearance Status"
 # Columns referenced by the business-logic doc's breakup KPIs.
 COL_COMMITMENT_LOADING = "commitment of loading date"          # -> Overdue Breakup
 COL_REVISION_COMMITMENT_LOADING = "revision commitment of loading date"  # -> New Committed Date
-# The sheet header carries a double space; accept the single-space form too.
-COL_COMMITMENT_LOADING_CHANGES = (
-    "no of commitment loading  changes",
-    "no of commitment loading changes",
-)
-COL_PRODUCTION_COMPLETION = "Production Completion Date"       # -> Prdn machines pending
 
 DATE_FORMAT = "%d-%m-%Y"  # sheet stores dates day-first (e.g. 07-07-2026)
 
@@ -193,6 +188,34 @@ def _max_date(mask: pd.Series, *cols: pd.Series) -> str:
     return best.strftime(DATE_FORMAT) if best is not None else ""
 
 
+def _min_date(mask: pd.Series, *cols: pd.Series) -> str:
+    """Earliest (min) date across the given columns for the masked rows.
+
+    Returns a ``DD-MM-YYYY`` string, or "" when none of the cells hold a date.
+    """
+    best = None
+    for col in cols:
+        parsed = pd.to_datetime(col[mask], format=DATE_FORMAT, errors="coerce").dropna()
+        if not parsed.empty:
+            candidate = parsed.min()
+            best = candidate if best is None else min(best, candidate)
+    return best.strftime(DATE_FORMAT) if best is not None else ""
+
+
+def _worst_delay_days(mask: pd.Series, col: pd.Series) -> int:
+    """Days between today and the oldest (earliest) date in ``col`` among masked rows.
+
+    The oldest still-overdue Production Commitment Date is that group's single
+    worst delay from 1st commitment — not an average across rows. Returns 0
+    when no masked row holds a real date.
+    """
+    parsed = pd.to_datetime(col[mask], format=DATE_FORMAT, errors="coerce").dropna()
+    if parsed.empty:
+        return 0
+    oldest = parsed.min()
+    return max(0, (pd.Timestamp(date.today()) - oldest).days)
+
+
 def compute_country_breakup(
     df: pd.DataFrame, month: str | None = None
 ) -> list[dict]:
@@ -214,7 +237,6 @@ def compute_country_breakup(
             return []
 
     qty = _to_numeric(_col(df, COL_QUANTITY))
-    commitment_loading_changes = _to_numeric(_col(df, COL_COMMITMENT_LOADING_CHANGES))
     prdn_changes = _to_numeric(_col(df, COL_PRDN_CHANGES))
     container_changes = _to_numeric(_col(df, COL_CONTAINER_CHANGES))
 
@@ -222,6 +244,7 @@ def compute_country_breakup(
     revision_commitment_loading = _col(df, COL_REVISION_COMMITMENT_LOADING)
     container_placement = _col(df, COL_CONTAINER_PLACEMENT)
     vessel_cutoff = _col(df, COL_VESSEL_CUTOFF)
+    machine_readiness = _col(df, COL_MACHINE_READINESS)
 
     # Row masks, each straight from the doc's KPI definitions.
     # KPI 2 — Pending Orders: loading date blank, OR the revised loading
@@ -230,10 +253,22 @@ def compute_country_breakup(
         _col(df, COL_REVISION_COMMITMENT_LOADING)
     )
     overdue_breakup = _blank_or_past(_col(df, COL_COMMITMENT_LOADING))       # KPI 3
-    prdn_pending = _is_blank_date(_col(df, COL_PRODUCTION_COMPLETION))       # KPI 7A
-    prdn_overdue = _is_past(_col(df, COL_MACHINE_REVISION))                  # KPI 7C
-    container_pending = _is_blank_date(_col(df, COL_CONTAINER_PLACEMENT))    # KPI 8A
-    container_overdue = _is_past(_col(df, COL_CONTAINER_REVISION))           # KPI 8C
+    machine_revision_past = _is_past(_col(df, COL_MACHINE_REVISION))
+    # KPI 7A — Prdn machines pending: no Production Commitment Date given yet,
+    # OR one was given but has since been superseded by a Production
+    # Commitment Revise Date that's itself now overdue (same
+    # blank-or-revised-is-late shape as KPI 2).
+    prdn_pending = _is_blank_date(machine_readiness) | machine_revision_past
+    prdn_overdue = machine_revision_past                                     # KPI 7C
+    container_revision = _col(df, COL_CONTAINER_REVISION)
+    # KPI 8A — Container machines pending: no placement date given yet, OR one
+    # was given but is now overdue and no Container Revision Date has been set
+    # yet either — once a revision date exists, the row is tracked via
+    # Container Overdue (KPI 8C) instead, not counted as pending anymore.
+    container_pending = _is_blank_date(container_placement) | (
+        _is_past(container_placement) & _is_blank_date(container_revision)
+    )
+    container_overdue = _is_past(container_revision)                         # KPI 8C
     clearance_pending = _clearance_pending(_col(df, COL_CLEARANCE_STATUS))   # KPI 10
 
     results = []
@@ -254,7 +289,7 @@ def compute_country_breakup(
                 "country": str(country),
                 "pending_orders": machines(pending_orders),          # KPI 2
                 "over_due_breakup": machines(overdue_breakup),       # KPI 3
-                "days_delay": average(commitment_loading_changes),   # KPI 4
+                "days_delay": _worst_delay_days(rows & overdue_breakup, machine_readiness),  # KPI 4
                 "new_committed_date": _max_date(rows, revision_commitment_loading),  # KPI 5
                 "container_expected_date": _max_date(rows, container_placement),     # KPI 6
                 "prdn_machines_pending": machines(prdn_pending),     # KPI 7A
@@ -263,7 +298,7 @@ def compute_country_breakup(
                 "container_machines_pending": machines(container_pending),  # KPI 8A
                 "container_commitment_changes": average(container_changes),  # KPI 8B
                 "container_overdue": machines(container_overdue),    # KPI 8C
-                "vessel_cutoff": _max_date(rows, vessel_cutoff),     # KPI 9
+                "vessel_cutoff": _min_date(rows, vessel_cutoff),     # KPI 9
                 "clearance_pending": machines(clearance_pending),    # KPI 10
             }
         )

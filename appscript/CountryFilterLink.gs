@@ -22,7 +22,11 @@ var FILTER_TAB_NAME = "SCM_Export_Orders"; // must match WORKSHEET_NAME in .env
 var FILTER_COLUMN_HEADER = "Country";
 
 function doGet(e) {
-  var country = ((e.parameter && e.parameter.country) || "").trim();
+  // `e` is only populated on a real HTTP request to the deployed /exec URL.
+  // Clicking "Run" on doGet directly in the editor calls it with no
+  // arguments at all, so guard `e` itself, not just `e.parameter` — see the
+  // test_* functions below for how to exercise this from the editor instead.
+  var country = ((e && e.parameter && e.parameter.country) || "").trim();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(FILTER_TAB_NAME);
 
@@ -89,13 +93,7 @@ function getOrCreateFilterView(ss, sheet, country) {
   }
 
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var colIndex = -1;
-  for (var i = 0; i < headers.length; i++) {
-    if (String(headers[i]).trim() === FILTER_COLUMN_HEADER) {
-      colIndex = i;
-      break;
-    }
-  }
+  var colIndex = findColumnIndex_(headers, FILTER_COLUMN_HEADER);
   if (colIndex === -1) {
     throw new Error(
       "Column '" + FILTER_COLUMN_HEADER + "' not found in " + FILTER_TAB_NAME
@@ -135,6 +133,57 @@ function getOrCreateFilterView(ss, sheet, country) {
   return fvid;
 }
 
+/**
+ * One-off cleanup: run this manually from the Apps Script editor (select
+ * "resetFilterViewCache" in the function dropdown, then Run) if country
+ * links start opening to blank/stale filtered views — e.g. right after the
+ * sheet's data was fully cleared and rewritten. Deletes every cached fvid
+ * Script Property AND every Filter View this script created (title starts
+ * with "Country: "), so the next click on each country builds a fresh view
+ * against the current data instead of reusing a stale one.
+ */
+function resetFilterViewCache() {
+  var props = PropertiesService.getScriptProperties();
+  var keys = props.getKeys().filter(function (k) {
+    return k.indexOf("fvid:") === 0;
+  });
+  keys.forEach(function (k) {
+    props.deleteProperty(k);
+  });
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(FILTER_TAB_NAME);
+  var removed = 0;
+  if (sheet) {
+    // Filter Views live outside the base SpreadsheetApp service, so they're
+    // only reachable (read or delete) via the Advanced Sheets API, same as
+    // getOrCreateFilterView/listFilterViewIds above.
+    var meta = Sheets.Spreadsheets.get(ss.getId(), {
+      fields: "sheets(properties.sheetId,filterViews(filterViewId,title))"
+    });
+    var deleteRequests = [];
+    (meta.sheets || []).forEach(function (s) {
+      if (s.properties.sheetId !== sheet.getSheetId() || !s.filterViews) return;
+      s.filterViews.forEach(function (fv) {
+        if (String(fv.title || "").indexOf("Country: ") === 0) {
+          deleteRequests.push({
+            deleteFilterView: { filterId: fv.filterViewId }
+          });
+        }
+      });
+    });
+    if (deleteRequests.length) {
+      Sheets.Spreadsheets.batchUpdate({ requests: deleteRequests }, ss.getId());
+      removed = deleteRequests.length;
+    }
+  }
+
+  Logger.log(
+    "Cleared " + keys.length + " cached fvid propert" + (keys.length === 1 ? "y" : "ies") +
+    " and removed " + removed + " matching Filter View(s)."
+  );
+}
+
 function listFilterViewIds(ss, sheetId) {
   var meta = Sheets.Spreadsheets.get(ss.getId(), {
     fields: "sheets(properties.sheetId,filterViews.filterViewId)"
@@ -154,4 +203,86 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
+}
+
+/** Index of `header` in `headers` (whitespace-trimmed), or -1 if absent. */
+function findColumnIndex_(headers, header) {
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim() === header) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**************************************************************
+ * Manual test helpers.
+ *
+ * doGet(e) only receives a real `e` when Google calls it for an actual HTTP
+ * request to the deployed /exec URL — clicking "Run" on doGet itself always
+ * passes no arguments, which is exactly the TypeError this file used to
+ * throw. To exercise doGet from the editor instead, select one of the
+ * functions below in the function dropdown and click Run, then check
+ * View > Logs (or Execution log) for the result.
+ **************************************************************/
+
+/** Happy path: fetches a real country from the sheet and filters on it. */
+function test_doGet() {
+  var country = getSampleCountry_();
+  var result = doGet({ parameter: { country: country } });
+  Logger.log("country=" + country + " ->\n" + result.getContent());
+}
+
+/** doGet called the way the editor's Run button calls it: no event at all. */
+function test_doGet_noEvent() {
+  var result = doGet();
+  Logger.log(result.getContent());
+}
+
+/** Missing 'country' query param. */
+function test_doGet_missingCountry() {
+  var result = doGet({ parameter: {} });
+  Logger.log(result.getContent());
+}
+
+/** A country with no matching rows — still builds a (empty) filter view. */
+function test_doGet_unknownCountry() {
+  var result = doGet({ parameter: { country: "Nowhereland" } });
+  Logger.log(result.getContent());
+}
+
+/** Wrong FILTER_TAB_NAME — exercises the "Tab not found" branch. */
+function test_doGet_missingTab() {
+  var realTab = FILTER_TAB_NAME;
+  FILTER_TAB_NAME = "____does_not_exist____";
+  try {
+    var result = doGet({ parameter: { country: "USA" } });
+    Logger.log(result.getContent());
+  } finally {
+    FILTER_TAB_NAME = realTab;
+  }
+}
+
+/** First non-blank Country value in the sheet, for tests to filter on. */
+function getSampleCountry_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(FILTER_TAB_NAME);
+  if (!sheet) {
+    throw new Error("Tab '" + FILTER_TAB_NAME + "' not found.");
+  }
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var colIndex = findColumnIndex_(headers, FILTER_COLUMN_HEADER);
+  if (colIndex === -1) {
+    throw new Error(
+      "Column '" + FILTER_COLUMN_HEADER + "' not found in " + FILTER_TAB_NAME
+    );
+  }
+  var values = sheet
+    .getRange(2, colIndex + 1, Math.max(sheet.getLastRow() - 1, 0), 1)
+    .getValues();
+  for (var i = 0; i < values.length; i++) {
+    var country = String(values[i][0]).trim();
+    if (country) return country;
+  }
+  throw new Error("No non-blank '" + FILTER_COLUMN_HEADER + "' value found to test with.");
 }
