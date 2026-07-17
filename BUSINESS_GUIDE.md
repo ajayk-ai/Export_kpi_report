@@ -1,9 +1,14 @@
 # SCM KPI Report — Guide for Business Users
 
 This guide explains, in plain language, what each number in the KPI report
-means, which sheet column it comes from, and walks through worked examples.
-For the technical/engineering write-up, see
+means, exactly how it's calculated (formula), which sheet column(s) it comes
+from, and a worked example. For the technical/engineering write-up, see
 [DOCUMENTATION.md](DOCUMENTATION.md).
+
+Every formula below is taken directly from the current code in
+[app/core/kpi_engine.py](app/core/kpi_engine.py) — if the sheet or the code
+changes, re-check this guide against that file rather than assuming it's
+still accurate.
 
 ## 1. What is this report?
 
@@ -12,8 +17,8 @@ sheet:
 
 1. **"How is our order book moving, month by month?"** — the 5-number KPI
    table (Opening / New / Total / Despatched / Balance).
-2. **"Which countries have late orders right now, and why?"** — the overdue
-   breakup table, for one chosen month.
+2. **"Which countries have pending or overdue orders right now, and why?"**
+   — the overdue breakup table, 13 numbers per country.
 
 An optional AI-written summary sits on top, calling out the trend and the
 biggest risk in a few sentences.
@@ -22,172 +27,301 @@ biggest risk in a few sentences.
 
 | Sheet column | What it means for the business |
 |---|---|
-| `Month` | Which month this order line belongs to. |
-| `Order Type (N / O)` | `N` = a brand-new order placed this month. Anything else is not counted as "new" again (it's already part of an earlier month's balance). |
-| `Quantity` | How many machines/units are on this order line. This is the number that gets added up everywhere. |
-| `Loading (Dispatched) Date` | The date the order actually left / was loaded for shipment. If this cell is blank or says "Pending", the order **has not shipped yet**. |
-| `Country` | Which country/dealer's order this is — used to group the overdue table. |
-| `over due days` | How many days past the original commitment this order currently is. `0` (or blank) = not overdue. |
-| `Production Commitment Date` | When the machine was originally due to be ready. Used, for a country's overdue orders, to work out "No of Days Delay from 1st Commitment". |
-| `Production Commitment Revise Date` | The latest revised production commitment date for that order. Shown as "New Committed Date". |
-| `Container Placement date` / `Container Revision Date` | When the container is expected — whichever of the two is later. Shown as "Container Expected Date". |
+| `Month` | Which month this order line was booked in. Every row belongs to exactly one month — there is no separate "carried forward" row; a row that ships late is simply edited in place, and its Loading Date decides which month gets credit for the despatch (see §3). |
+| `Quantity` | How many machines/units are on this order line. This is the number that gets added up for every KPI in this report. |
+| `Loading (Dispatched) Date` | The date the order actually left / was loaded for shipment. If this cell is blank or says "Pending" (or holds a future date), the order **has not shipped yet**. |
+| `Country` | Which country/dealer's order this is — used to group the breakup table, one row per country. |
+| `Production Commitment Date` | When the machine was originally due to be ready. |
+| `Production Commitment Revise Date` | The factory's latest revised production commitment, when one has been given. Wins over the original date wherever both are used. |
+| `revision commitment of loading date` | A *different* column from the one above — this is the revised loading/despatch commitment. It only drives **Pending Orders**; nothing else reads it. |
+| `Container Placement date` / `Container Revision Date` | When the container is expected, and any revision to that date. |
 | `Vessel Cut-Off Date` | The shipping line's cut-off date for that order's vessel. |
 | `no of times commitment changes(prod)` | How many times the factory has pushed back its production commitment for that order. |
-| `no of comm container changes` | How many times the container commitment has changed. |
-| `Commercial Clearance Status` | Whether export/customs clearance is done. Only `Completed / Complete / Cleared / Done / Yes` count as finished — everything else (blank, "Pending", anything else) counts as **still pending**. |
+| `no of comm container changes` | How many times the container commitment has changed for that order. |
+| `Commercial Clearance Status` | Export/customs clearance status. Only a **blank cell** or the literal word **"Pending"** (any capitalisation) count as pending — every other value (Completed, Cleared, Done, Yes, or anything else you type in there, typos included) is treated as cleared. |
+| `over due days` | A legacy column, kept in the sheet but no longer used by any KPI in this report. |
 
-## 3. The monthly KPI table
+## 3. The monthly summary table
 
-Five numbers per month:
+Five numbers per month, each with its formula.
 
-| Term | Plain-language meaning |
-|---|---|
-| **Opening Order** | Orders still owed to customers at the *start* of the month — i.e. whatever was left over (Balance) from the previous month. |
-| **New Order** | Brand-new orders (Order Type = `N`) placed *during* this month. |
-| **Total Order** | Opening Order + New Order — everything we owe customers this month. |
-| **Despatched** | Orders whose Loading/Dispatched Date falls during this month — whichever month they actually shipped in, even if they were booked (or carried forward) in an earlier month. |
-| **Balance** | Total Order − Despatched — what's still owed at month end. This becomes next month's Opening Order. |
+### Opening Order
+> Orders still owed to customers at the *start* of the month.
 
-### Worked example
+**Formula:** `Opening Order(month) = Balance(previous month)` — and `0` for
+the first month in the report (nothing to carry in).
 
-Say `SCM_Export` has these rows (simplified — only the relevant columns
-shown):
+### New Order
+> Brand-new order quantity booked *in* this month.
 
-| Month | Order Type | Quantity | Loading Date |
-|---|---|---|---|
-| APRIL | N | 10 | 15-04-2026 |
-| APRIL | N | 8  | *(blank — not shipped yet)* |
-| MAY   | N | 12 | 20-05-2026 |
-| MAY   | O | 8  | 05-05-2026 |
-| JUNE  | N | 5  | *(blank — not shipped yet)* |
+**Formula:** `New Order(month) = SUM(Quantity)` for every row whose `Month`
+cell equals this month — regardless of when (or whether) it later ships.
 
-Walking through it month by month:
+### Total Order
+> Everything we owe customers this month.
 
-**APRIL** — Opening = 0 (nothing carried in, it's the first month).
-New = 10 + 8 = **18** (both rows are Order Type `N` in April).
-Total = 0 + 18 = **18**. Despatched = 10 (only the first row has a
-real date). Balance = 18 − 10 = **8**.
+**Formula:** `Total Order = Opening Order + New Order`
 
-**MAY** — Opening = **8** (April's Balance carries in).
-New = 12 (only the `N` row counts; the `O` row is *not* added again — it's
-already reflected via the Opening Order it belongs to).
-Total = 8 + 12 = **20**. Despatched = 12 + 8 = **20** (both May rows have a
-real Loading Date, regardless of order type). Balance = 20 − 20 = **0**.
+### Despatched
+> Orders that actually shipped during this calendar month.
 
-**JUNE** — Opening = **0** (May's Balance).
-New = 5. Total = 0 + 5 = **5**. Despatched = 0 (blank date). Balance =
-5 − 0 = **5**.
+**Formula:** `Despatched(month) = SUM(Quantity)` for every row whose
+`Loading (Dispatched) Date` is a real, parseable date that is **on or before
+today** *and* whose calendar month matches — no matter which `Month` the row
+was originally booked under. A row booked in April that finally ships in
+June is credited to June's Despatched, not April's.
 
-So the printed table would read:
+### Balance
+> What's still owed at month end. Becomes next month's Opening Order.
 
-```
-APRIL: Opening=0,  New=18, Total=18, Despatched=10, Balance=8
-MAY:   Opening=8,  New=12, Total=20, Despatched=20, Balance=0
-JUNE:  Opening=0,  New=5,  Total=5,  Despatched=0,  Balance=5
-```
+**Formula:** `Balance = Total Order − Despatched`
 
-A positive Balance means we still owe customers units at month end; the
-report highlights it in red when negative (we shipped more than we owed —
-usually a sign old backlog finally went out) and green otherwise.
-
-## 4. The overdue country breakup
-
-This table only looks at **one month at a time** (whichever month is set in
-`REPORT_MONTH`, or the latest month in the sheet if that's left blank), and
-only lists a country if it currently has orders that are either **not yet
-shipped** or **overdue**.
-
-| Column | Plain-language meaning |
-|---|---|
-| **Over Due Breakup** | Total quantity of that country's orders that are still un-shipped and overdue on their production commitment: `Loading Date` is blank, and — checking `Production Commitment Revise Date` first, falling back to `Production Commitment Date` only when no revise date has been given — that date is earlier than today. |
-| **No of Days Delay from 1st Commitment** | Among that country's overdue orders, the oldest `Production Commitment Date` vs. today — the single worst delay, not an average. |
-| **New Committed Date** | The latest revised production date given to that country's overdue orders. |
-| **Container Expected Date** | The latest expected container date for those overdue orders. |
-| **Prdn Commitment → No of machines pending** | Quantity where the machine has no readiness date yet, or its readiness date has been superseded by a revised production date (`Production Commitment Revise Date`) that's also now overdue. |
-| **Prdn Commitment → No of commitment changes** | How many times the factory pushed back its commitment on that country's overdue orders, added up. |
-| **Container Commitment → No of machines pending** | Quantity where the container has no placement date yet, or its placement date has passed with no revised container date given yet either. Once a revised date is given, that order is tracked under Container Overdue instead. |
-| **Container Commitment → No of commitment changes** | How many times the container date changed on that country's overdue orders, added up. |
-| **Vessel Cut Off** | The earliest (nearest) vessel cut-off date among that country's overdue orders. |
-| **Commercial Clearance no of Pending** | Quantity of that country's orders (overdue or not) where customs/export clearance isn't done yet. |
-| **Sub Total row** | Straight column sum across every country. Dates are never summed. |
-
-Countries are listed worst-first (highest Over Due Breakup at the top).
+A negative Balance (shown in red) means more shipped this month than was
+owed — usually old backlog finally clearing out. Non-negative Balance is
+shown in green.
 
 ### Worked example
 
-For June (assume today is 22-06-2026), suppose these are the only rows:
+Rows in the sheet (only the relevant columns shown):
 
-| Country | Quantity | Production Commitment Date | Production Commitment Revise Date | Loading Date | Clearance Status |
-|---|---|---|---|---|---|
-| UAE | 6 | 10-06-2026 | *(blank)* | *(blank)* | Pending |
-| UAE | 4 | 18-06-2026 | *(blank)* | 10-06-2026 | Completed |
-| Kenya | 3 | 02-06-2026 | *(blank)* | *(blank)* | *(blank)* |
+| Month | Quantity | Loading Date |
+|---|---|---|
+| APRIL | 10 | 15-04-2026 |
+| APRIL | 8  | *(blank at first — see below)* |
+| MAY   | 12 | 20-05-2026 |
+| JUNE  | 5  | *(blank — still not shipped)* |
 
-- **UAE**: has one overdue row (qty 6, not yet shipped, no revise date so
-  falls back to Production Commitment Date 10-06-2026 — past today) and one
-  on-time, shipped row (shipped rows are never overdue, regardless of their
-  dates). Over Due Breakup = **6**. Days Delay = **12** (22-06 minus 10-06,
-  from the one overdue row). Machines pending (both prod & container) = 6
-  (only the un-shipped row). Clearance Pending = 6 (the un-shipped row's
-  status is "Pending"; the shipped row is "Completed" so it doesn't count).
-- **Kenya**: one overdue, unshipped row, no revise date. Over Due Breakup =
-  **3**. Days Delay = **20** (22-06 minus 02-06). Machines pending = 3.
-  Clearance Pending = 3 (blank status counts as pending).
+Suppose the April qty-8 row doesn't actually ship until **10-06-2026** — the
+same row just gets its `Loading Date` filled in that day; it doesn't turn
+into a new row.
 
-If a row *does* carry a Production Commitment Revise Date, Over Due Breakup
-checks that date instead of the original Production Commitment Date — the
-revise date wins whenever it's present, even if the original date hasn't
-arrived yet. Note that Days Delay always measures from the original
-Production Commitment Date regardless of which date decided Over Due Breakup,
-so a row that's only overdue because of its revise date can show up in Over
-Due Breakup while contributing 0 to that country's Days Delay.
+**APRIL** — Opening = 0 (first month). New = 10 + 8 = **18** (both rows
+belong to April). Despatched = **10** (only the first row's date falls in
+April so far — the second row is still blank at this point). Total = 0 + 18
+= **18**. Balance = 18 − 10 = **8**.
 
-Kenya is worse on delay (20 days) but UAE has the bigger overdue quantity, so
-UAE is listed first (sorted by quantity, not by days late).
+**MAY** — Opening = **8** (April's balance). New = **12** (May's own row).
+Total = 8 + 12 = **20**. Despatched = **12** (only the May row's date falls
+in May — the April qty-8 row hasn't shipped yet). Balance = 20 − 12 = **8**.
+
+**JUNE** — Opening = **8** (May's balance — still the same unshipped April
+units). New = **5** (June's own row). Total = 8 + 5 = **13**. Despatched =
+**8** — the April qty-8 row's Loading Date (10-06-2026) now falls in June,
+so June gets credit for it, even though it was booked in April. June's own
+row is still blank, so it contributes 0. Balance = 13 − 8 = **5**.
+
+```
+APRIL: Opening=0, New=18, Total=18, Despatched=10, Balance=8
+MAY:   Opening=8, New=12, Total=20, Despatched=12, Balance=8
+JUNE:  Opening=8, New=5,  Total=13, Despatched=8,  Balance=5
+```
+
+This is the whole point of despatch-by-actual-ship-date: the April backlog
+doesn't vanish from the report and doesn't get double counted — it sits in
+Balance until the month it truly ships, then reduces Balance in *that*
+month.
+
+## 4. The country overdue breakup
+
+One row per unique, non-blank `Country`. By default this table looks across
+**all months in the sheet** (not just the latest one), so a stale order
+booked months ago still shows up if it's still pending — set `REPORT_MONTH`
+if you want it scoped to a single month instead.
+
+Two of the thirteen numbers below (**Pending Orders** and **Over Due
+Breakup**) look at *all* of that country's rows. The other eleven are all
+scoped to that country's **currently overdue rows** (i.e. the rows counted
+in Over Due Breakup) — they're a breakdown of *why* those specific orders
+are overdue, not independent counts across the country's whole order book.
+
+> **Note:** "Pending Orders" is computed but is only shown in the plain-text
+> version of the report (console/email fallback) — it does not appear as a
+> column in the HTML table you see in the browser/email.
+
+### Worked example — one country, all 13 numbers
+
+Assume **today is 17-Jul-2026**, and `Kenya` has exactly these 4 rows:
+
+| Row | Qty | Loading Date | Prod. Commit. Date | Prod. Commit. Revise Date | Container Placement | Container Revision | Vessel Cut-Off | Prod. changes | Container changes | Clearance Status | revision commitment of loading date |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| A | 6 | *(blank)* | 05-06-2026 | *(blank)* | *(blank)* | *(blank)* | 20-07-2026 | 2 | 0 | Pending | *(blank)* |
+| B | 4 | *(blank)* | 01-05-2026 | 10-07-2026 | 15-06-2026 | *(blank)* | 18-07-2026 | 1 | 1 | Completed | 05-07-2026 |
+| C | 3 | 10-07-2026 | 01-06-2026 | *(blank)* | *(blank)* | *(blank)* | *(blank)* | 0 | 0 | Done | *(blank)* |
+| D | 5 | *(blank)* | *(blank)* | *(blank)* | 25-07-2026 *(future)* | *(blank)* | *(blank)* | 0 | 0 | *(blank)* | *(blank)* |
+
+Row C already shipped (10-07-2026 is a real, past date), so it's excluded
+from every "still pending" calculation below.
+
+---
+
+**1. Pending Orders**
+**Formula:** `SUM(Quantity)` where Loading Date is blank **OR**
+`revision commitment of loading date` is a past date.
+Rows: A (blank loading) + B (blank loading, and its revision-of-loading-date
+is also past) + D (blank loading) = 6 + 4 + 5 = **15**. (C is shipped, so
+excluded.)
+
+**2. Over Due Breakup**
+**Formula:** `SUM(Quantity)` where Loading Date is blank **AND** the
+*effective* production commitment date is past — using
+`Production Commitment Revise Date` if one's been given, otherwise falling
+back to `Production Commitment Date`.
+- A: no revise date → falls back to 05-06-2026, which is past → counts (6).
+- B: revise date 10-07-2026 is past → counts (4).
+- D: no revise date and no original date either → no effective date at all
+  → **not** counted (a commitment that was never given isn't "overdue" yet,
+  it's just "pending" — see KPI 1).
+Total = 6 + 4 = **10**. These two rows (A, B) are Kenya's "overdue rows" —
+every KPI below is scoped to just these two.
+
+**3. No of Days Delay from 1st Commitment**
+**Formula:** `today − MIN(Production Commitment Date)` among the overdue
+rows (A, B) — the single oldest date, not an average.
+Oldest of A's 05-06-2026 and B's 01-05-2026 is **01-05-2026**.
+17-Jul-2026 − 01-May-2026 = **77 days**.
+
+**4. New Committed Date**
+**Formula:** the **earliest** effective commitment date among the overdue
+rows (Revise Date if given, else original date). This is the *oldest*
+still-unresolved commitment, not the newest — despite the name, it
+highlights the worst-lagging promise, matching KPI 3 above.
+A's effective date = 05-06-2026 (no revise, falls back). B's effective date
+= 10-07-2026 (has a revise date). Earliest of the two = **05-06-2026**.
+
+**5. Container Expected Date**
+**Formula:** the **latest** `Container Placement date` among the overdue
+rows. (Only the placement date feeds this — a Container Revision Date, even
+if present, isn't looked at here.)
+A has none; B has 15-06-2026. Result = **15-06-2026**.
+
+**6. Prdn Committment Pending → No of machines**
+**Formula:** among the overdue rows, `SUM(Quantity)` where
+`Production Commitment Date` is blank or past, **OR** the Revise Date is
+past.
+A: original date past → counts (6). B: original date past → counts (4).
+Total = **10**.
+
+**7. Prdn Committment Pending → No of commitment changes**
+**Formula:** `SUM(no of times commitment changes(prod))` across the
+overdue rows (this used to be an average across *all* rows; it is now a
+**sum across just the overdue rows**).
+A (2) + B (1) = **3**.
+
+**8. Production Overdue**
+**Formula:** among the overdue rows, `SUM(Quantity)` where
+`Production Commitment Revise Date` specifically is past (a blank revise
+date does **not** count here, even though it counts in KPI 6 above).
+A: revise date is blank → doesn't count (0). B: revise date 10-07-2026 is
+past → counts (4). Total = **4**.
+
+**9. Container Committment Pending → No of machines**
+**Formula:** among the overdue rows, `SUM(Quantity)` where the Container
+Placement date is blank, **or** it's past *and* the Container Revision Date
+is either blank or also past.
+A: placement blank → counts (6). B: placement past, revision blank →
+counts (4). Total = **10**.
+
+**10. Container Committment Pending → No of commitment changes**
+**Formula:** `SUM(no of comm container changes)` across the overdue rows
+(also a sum now, not an average).
+A (0) + B (1) = **1**.
+
+**11. Container Overdue**
+**Formula:** among the overdue rows, `SUM(Quantity)` where
+`Container Revision Date` specifically is past.
+Neither A nor B has a revision date set → **0**. (Note this is smaller than
+KPI 9's "no of machines pending" — a row can be *pending* a container
+commitment without yet being formally *overdue* on a revised container
+date.)
+
+**12. Vessel Cut off**
+**Formula:** the **earliest** `Vessel Cut-Off Date` among the overdue rows.
+A = 20-07-2026, B = 18-07-2026 → earliest = **18-07-2026**.
+
+**13. Commerical Clearance no of Pending**
+**Formula:** among the overdue rows, `SUM(Quantity)` where
+`Commercial Clearance Status` is blank or literally "Pending".
+A: "Pending" → counts (6). B: "Completed" → doesn't count. Total = **6**.
+
+---
+
+So Kenya's printed row would read:
+
+```
+Kenya: Pending=15, OverDue=10, DaysDelay=77, NewCommitted=05-06-2026,
+       ContainerExpected=15-06-2026, Vessel=18-07-2026,
+       Prdn(pending=10, changes=3, overdue=4),
+       Container(pending=10, changes=1, overdue=0),
+       ClearancePending=6
+```
+
+Countries are listed **worst-first**, sorted by Over Due Breakup (KPI 2) —
+not by Days Delay, so a country with a smaller quantity but longer delay can
+still be listed below one with a bigger quantity but shorter delay.
+
+The **Sub Total** row at the bottom only totals the "count" columns
+(Pending Orders isn't shown there since it isn't in the HTML table either;
+Over Due Breakup, both "No of machines" pairs, both Overdue columns, and
+Clearance Pending are summed). Days Delay, the two "No of commitment
+changes" columns, and every date column are left blank in Sub Total — an
+oldest-date, a change count, or a date doesn't mean anything once you add it
+across countries.
 
 ## 5. What counts as "shipped" / "overdue" / "clearance done"?
 
-- **Shipped/Despatched** = the `Loading (Dispatched) Date` cell holds an
-  actual date in `DD-MM-YYYY` format. A blank cell or the word "Pending"
-  both mean *not shipped*, even though they look different in the sheet.
-- **Overdue** (for Over Due Breakup) = not yet shipped, and the production
-  commitment date has passed: `Production Commitment Revise Date` if one's
-  been given, otherwise `Production Commitment Date`. The legacy `over due
-  days` column is no longer used by any KPI.
-- **Clearance done** = the status cell says (any case) one of: Completed,
-  Complete, Cleared, Done, or Yes. Anything else — including a blank cell —
-  counts as still pending.
+- **Shipped/Despatched** = the `Loading (Dispatched) Date` cell holds a real
+  date in `DD-MM-YYYY` format that is on or before today. A blank cell, the
+  word "Pending", or a future-dated cell all mean *not shipped yet*.
+- **Overdue** (drives Over Due Breakup and everything scoped to it) = not
+  yet shipped, and the *effective* production commitment date has passed:
+  `Production Commitment Revise Date` if one's been given, otherwise
+  `Production Commitment Date`. A row with **no** commitment date given at
+  all is "pending" but not yet "overdue" — there's nothing to be late
+  against.
+- **Clearance done** = anything other than a blank cell or the literal word
+  "Pending" (case-insensitive). This is intentionally permissive — a status
+  cell with a typo or an unexpected value (e.g. "In progress") is treated
+  as cleared, since only "blank" and "Pending" are recognised as not-done.
 
 ## 6. The AI summary
 
 If a Gemini API key is configured, the report includes a short AI-written
 paragraph: 3–5 bullet points on the order/despatch trend and the biggest
-overdue risk, plus one "Key Takeaway" line. It's generated fresh from the
-same numbers shown in the tables — it doesn't add new data, just narrates
-what's already there. If no key is set (or the AI call fails for any
-reason), this section is simply left out and the rest of the report is
-unaffected.
+overdue risk, plus one "Key Takeaway" line, generated from the top 3 overdue
+countries (only those with `over_due_breakup > 0`) plus every month's KPI
+line. It's generated fresh from the same numbers shown in the tables — it
+doesn't add new data, just narrates what's already there. If no key is set
+(or the AI call fails for any reason), this section is simply left out and
+the rest of the report is unaffected.
 
 ## 7. Common questions
 
-**Why is April's Opening Order always 0?**
+**Why is the first month's Opening Order always 0?**
 Because there's no earlier month in the report to carry a balance in from.
-The very first month always starts at 0.
 
 **A country shows 0 in "Over Due Breakup" but still appears — why?**
-Because it still has un-shipped orders (they show up under "machines
-pending"), even though none of them are late yet.
+Because it still has un-shipped orders (they show up under "Pending
+Orders" and possibly "No of machines pending"), even though none of them
+are late yet — for example, a row with no commitment date given at all.
 
 **Why doesn't "Balance" match what I expect from just this month's rows?**
 Balance is cumulative — it carries forward everything unshipped from every
 prior month, not just this month's new orders.
 
 **An order was booked last month but only shipped this month — where does it show up?**
-As Despatched *this* month, not the month it was booked in. Despatched is
-based on the actual Loading/Dispatched Date, so a carry-forward order reduces
-Balance in the month it really ships, instead of sitting in Balance forever.
+As Despatched *this* month, not the month it was booked in — the same sheet
+row just gets its Loading Date filled in when it ships. See the worked
+example in §3.
 
-**A row's Order Type isn't "N" — where does it show up?**
-It's counted as Despatched if it ships in that month, and it feeds Balance
-indirectly through Opening Order, but it is never added into "New Order" —
-that column is reserved for brand-new orders only.
+**Why does "New Committed Date" show an older date than I expected?**
+It's not the newest revision — it's the *earliest* effective commitment
+date among that country's currently overdue rows, i.e. the oldest
+unresolved promise. It's meant to line up with "Days Delay from 1st
+Commitment" (§4, KPI 3), which is also driven by the oldest date.
+
+**Why is "No of machines pending" bigger than "Overdue" for the same
+commitment (production or container)?**
+Pending counts a broader condition (no date given yet, *or* the date is
+past); Overdue only counts rows where a **revised** date has specifically
+been given and has itself now passed. A row that's late on its original
+date but hasn't been given a revision yet is pending, not yet overdue.

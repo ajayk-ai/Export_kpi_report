@@ -246,8 +246,8 @@ def compute_country_breakup(
     Every KPI follows the business-logic doc (``logic_docs/Export Kpi
     project.docx``). If ``month`` is given, only that month's rows are
     considered. All "count" KPIs are expressed in machines (sum of Quantity over
-    the matching rows); the "commitment changes" KPIs are averages of their
-    respective change-count columns across the country's rows.
+    the matching rows); the "commitment changes" KPIs are sums of their
+    respective change-count columns across the country's overdue rows.
     """
     if df.empty or COL_COUNTRY not in df.columns:
         return []
@@ -300,12 +300,15 @@ def compute_country_breakup(
     )
     prdn_overdue = machine_revision_past                                     # KPI 7C
     container_revision = _col(df, COL_CONTAINER_REVISION)
-    # KPI 8A — Container machines pending: no placement date given yet, OR one
-    # was given but is now overdue and no Container Revision Date has been set
-    # yet either — once a revision date exists, the row is tracked via
-    # Container Overdue (KPI 8C) instead, not counted as pending anymore.
+    # KPI 8A — Container machines pending: no placement date given yet, OR
+    # that date has itself already passed — and then, regardless of whether
+    # a Container Revision Date has been set, either a blank revision or a
+    # revision that's itself now overdue also counts as pending (same
+    # blank-or-past shape as KPI 7A, just nested under "placement is past"
+    # since a revision only exists once the original placement is overdue).
     container_pending = _is_blank_date(container_placement) | (
-        _is_past(container_placement) & _is_blank_date(container_revision)
+        _is_past(container_placement)
+        & (_is_blank_date(container_revision) | _is_past(container_revision))
     )
     container_overdue = _is_past(container_revision)                         # KPI 8C
     clearance_pending = _clearance_pending(_col(df, COL_CLEARANCE_STATUS))   # KPI 10
@@ -326,10 +329,6 @@ def compute_country_breakup(
         def machines(mask: pd.Series, _rows: pd.Series = rows) -> int:
             return int(qty[_rows & mask].sum())
 
-        def average(series: pd.Series, _rows: pd.Series = rows) -> int:
-            vals = series[_rows]
-            return round(float(vals.mean())) if len(vals) else 0
-
         def total(series: pd.Series, _rows: pd.Series = rows) -> int:
             return int(series[_rows].sum())
 
@@ -345,7 +344,7 @@ def compute_country_breakup(
                 "prdn_commitment_changes": total(prdn_changes, overdue_rows),      # KPI 7B
                 "prdn_overdue": machines(prdn_overdue, overdue_rows),              # KPI 7C
                 "container_machines_pending": machines(container_pending, overdue_rows),  # KPI 8A
-                "container_commitment_changes": average(container_changes, overdue_rows),  # KPI 8B
+                "container_commitment_changes": total(container_changes, overdue_rows),    # KPI 8B
                 "container_overdue": machines(container_overdue, overdue_rows),    # KPI 8C
                 "vessel_cutoff": _min_date(overdue_rows, vessel_cutoff),     # KPI 9
                 "clearance_pending": machines(clearance_pending, overdue_rows),    # KPI 10
