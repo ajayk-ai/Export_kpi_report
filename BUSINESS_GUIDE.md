@@ -43,7 +43,7 @@ biggest risk in a few sentences.
 
 ## 3. The monthly summary table
 
-Five numbers per month, each with its formula.
+Five numbers per month, each with its formula and its own worked example.
 
 ### Opening Order
 > Orders still owed to customers at the *start* of the month.
@@ -51,16 +51,26 @@ Five numbers per month, each with its formula.
 **Formula:** `Opening Order(month) = Balance(previous month)` — and `0` for
 the first month in the report (nothing to carry in).
 
+**Worked example:** April is the first month in the report, so April's
+Opening Order = **0**. April's Balance comes out to 8 (see the Balance
+example below) — so May's Opening Order = **8**.
+
 ### New Order
 > Brand-new order quantity booked *in* this month.
 
 **Formula:** `New Order(month) = SUM(Quantity)` for every row whose `Month`
 cell equals this month — regardless of when (or whether) it later ships.
 
+**Worked example:** Two rows are booked in April: qty 10 and qty 8.
+New Order (April) = 10 + 8 = **18**.
+
 ### Total Order
 > Everything we owe customers this month.
 
 **Formula:** `Total Order = Opening Order + New Order`
+
+**Worked example:** May's Opening Order = 8 (April's Balance), and May's New
+Order = 12 (one row booked in May). Total Order (May) = 8 + 12 = **20**.
 
 ### Despatched
 > Orders that actually shipped during this calendar month.
@@ -71,6 +81,12 @@ today** *and* whose calendar month matches — no matter which `Month` the row
 was originally booked under. A row booked in April that finally ships in
 June is credited to June's Despatched, not April's.
 
+**Worked example:** A qty-8 row was booked in April, but its
+`Loading (Dispatched) Date` doesn't get filled in until **10-06-2026**.
+That date falls in June, so this row contributes 0 to April's Despatched and
+0 to May's Despatched — it only counts once, as **8**, toward **June's**
+Despatched, the month it actually shipped.
+
 ### Balance
 > What's still owed at month end. Becomes next month's Opening Order.
 
@@ -80,7 +96,11 @@ A negative Balance (shown in red) means more shipped this month than was
 owed — usually old backlog finally clearing out. Non-negative Balance is
 shown in green.
 
-### Worked example
+**Worked example:** April's Total Order = 18 and April's Despatched = 10
+(only one of the two April rows has shipped so far). Balance (April) =
+18 − 10 = **8**. This 8 becomes May's Opening Order.
+
+### Putting it all together — a full multi-month walkthrough
 
 Rows in the sheet (only the relevant columns shown):
 
@@ -138,7 +158,7 @@ are overdue, not independent counts across the country's whole order book.
 > version of the report (console/email fallback) — it does not appear as a
 > column in the HTML table you see in the browser/email.
 
-### Worked example — one country, all 13 numbers
+### Shared example data — one country, used for every KPI below
 
 Assume **today is 17-Jul-2026**, and `Kenya` has exactly these 4 rows:
 
@@ -157,91 +177,96 @@ from every "still pending" calculation below.
 **1. Pending Orders**
 **Formula:** `SUM(Quantity)` where Loading Date is blank **OR**
 `revision commitment of loading date` is a past date.
-Rows: A (blank loading) + B (blank loading, and its revision-of-loading-date
-is also past) + D (blank loading) = 6 + 4 + 5 = **15**. (C is shipped, so
-excluded.)
+**Worked example:** A (blank loading) + B (blank loading, and its
+revision-of-loading-date is also past) + D (blank loading) =
+6 + 4 + 5 = **15**. (C is shipped, so excluded.)
 
 **2. Over Due Breakup**
 **Formula:** `SUM(Quantity)` where Loading Date is blank **AND** the
 *effective* production commitment date is past — using
 `Production Commitment Revise Date` if one's been given, otherwise falling
 back to `Production Commitment Date`.
+**Worked example:**
 - A: no revise date → falls back to 05-06-2026, which is past → counts (6).
 - B: revise date 10-07-2026 is past → counts (4).
 - D: no revise date and no original date either → no effective date at all
   → **not** counted (a commitment that was never given isn't "overdue" yet,
   it's just "pending" — see KPI 1).
+
 Total = 6 + 4 = **10**. These two rows (A, B) are Kenya's "overdue rows" —
 every KPI below is scoped to just these two.
 
 **3. No of Days Delay from 1st Commitment**
 **Formula:** `today − MIN(Production Commitment Date)` among the overdue
 rows (A, B) — the single oldest date, not an average.
-Oldest of A's 05-06-2026 and B's 01-05-2026 is **01-05-2026**.
-17-Jul-2026 − 01-May-2026 = **77 days**.
+**Worked example:** oldest of A's 05-06-2026 and B's 01-05-2026 is
+**01-05-2026**. 17-Jul-2026 − 01-May-2026 = **77 days**.
 
 **4. New Committed Date**
 **Formula:** the **earliest** effective commitment date among the overdue
 rows (Revise Date if given, else original date). This is the *oldest*
 still-unresolved commitment, not the newest — despite the name, it
 highlights the worst-lagging promise, matching KPI 3 above.
-A's effective date = 05-06-2026 (no revise, falls back). B's effective date
-= 10-07-2026 (has a revise date). Earliest of the two = **05-06-2026**.
+**Worked example:** A's effective date = 05-06-2026 (no revise, falls
+back). B's effective date = 10-07-2026 (has a revise date). Earliest of the
+two = **05-06-2026**.
 
 **5. Container Expected Date**
 **Formula:** the **latest** `Container Placement date` among the overdue
 rows. (Only the placement date feeds this — a Container Revision Date, even
 if present, isn't looked at here.)
-A has none; B has 15-06-2026. Result = **15-06-2026**.
+**Worked example:** A has none; B has 15-06-2026. Result = **15-06-2026**.
 
 **6. Prdn Committment Pending → No of machines**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
 `Production Commitment Date` is blank or past, **OR** the Revise Date is
 past.
-A: original date past → counts (6). B: original date past → counts (4).
-Total = **10**.
+**Worked example:** A: original date past → counts (6). B: original date
+past → counts (4). Total = **10**.
 
 **7. Prdn Committment Pending → No of commitment changes**
 **Formula:** `SUM(no of times commitment changes(prod))` across the
 overdue rows (this used to be an average across *all* rows; it is now a
 **sum across just the overdue rows**).
-A (2) + B (1) = **3**.
+**Worked example:** A (2) + B (1) = **3**.
 
 **8. Production Overdue**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
 `Production Commitment Revise Date` specifically is past (a blank revise
 date does **not** count here, even though it counts in KPI 6 above).
-A: revise date is blank → doesn't count (0). B: revise date 10-07-2026 is
-past → counts (4). Total = **4**.
+**Worked example:** A: revise date is blank → doesn't count (0). B: revise
+date 10-07-2026 is past → counts (4). Total = **4**.
 
 **9. Container Committment Pending → No of machines**
 **Formula:** among the overdue rows, `SUM(Quantity)` where the Container
 Placement date is blank, **or** it's past *and* the Container Revision Date
 is either blank or also past.
-A: placement blank → counts (6). B: placement past, revision blank →
-counts (4). Total = **10**.
+**Worked example:** A: placement blank → counts (6). B: placement past,
+revision blank → counts (4). Total = **10**.
 
 **10. Container Committment Pending → No of commitment changes**
 **Formula:** `SUM(no of comm container changes)` across the overdue rows
 (also a sum now, not an average).
-A (0) + B (1) = **1**.
+**Worked example:** A (0) + B (1) = **1**.
 
 **11. Container Overdue**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
 `Container Revision Date` specifically is past.
-Neither A nor B has a revision date set → **0**. (Note this is smaller than
-KPI 9's "no of machines pending" — a row can be *pending* a container
-commitment without yet being formally *overdue* on a revised container
-date.)
+**Worked example:** neither A nor B has a revision date set → **0**. (Note
+this is smaller than KPI 9's "no of machines pending" — a row can be
+*pending* a container commitment without yet being formally *overdue* on a
+revised container date.)
 
 **12. Vessel Cut off**
 **Formula:** the **earliest** `Vessel Cut-Off Date` among the overdue rows.
-A = 20-07-2026, B = 18-07-2026 → earliest = **18-07-2026**.
+**Worked example:** A = 20-07-2026, B = 18-07-2026 → earliest =
+**18-07-2026**.
 
 **13. Commerical Clearance no of Pending**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
 `Commercial Clearance Status` is blank or literally "Pending".
-A: "Pending" → counts (6). B: "Completed" → doesn't count. Total = **6**.
+**Worked example:** A: "Pending" → counts (6). B: "Completed" → doesn't
+count. Total = **6**.
 
 ---
 
