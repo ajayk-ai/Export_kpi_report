@@ -278,7 +278,7 @@ def _breakup_rows_html(breakup: list[dict]) -> str:
     rows = []
     for i, b in enumerate(breakup):
         bg = _ROW_ALT if i % 2 else "#ffffff"
-        over = int(b["pending_orders"])
+        over = int(b["over_due_breakup"])
         over_color = _NEG if over > 0 else "#1f2937"
         rows.append(
             f'<tr style="background:{bg};">'
@@ -306,7 +306,7 @@ def _breakup_subtotal_html(breakup: list[dict]) -> str:
     return (
         f"<tr>"
         f'<td style="{_TD_LEFT}background:{_HDR_YELLOW};">Sub Total</td>'
-        f'<td style="{sub_td}color:{_NEG};">{t["pending_orders"]}</td>'
+        f'<td style="{sub_td}color:{_NEG};">{t["over_due_breakup"]}</td>'
         f'<td style="{sub_td}"></td>'  # Days Delay (average, not summed)
         f'<td style="{sub_td}"></td>'  # New Committed Date (dates don't total)
         f'<td style="{sub_td}"></td>'  # Container Expected Date

@@ -99,7 +99,7 @@ shipped** or **overdue**.
 
 | Column | Plain-language meaning |
 |---|---|
-| **Over Due Breakup** | Total quantity of that country's orders that are currently overdue (`over due days` > 0). |
+| **Over Due Breakup** | Total quantity of that country's orders that are still un-shipped and overdue on their production commitment: `Loading Date` is blank, and — checking `Production Commitment Revise Date` first, falling back to `Production Commitment Date` only when no revise date has been given — that date is earlier than today. |
 | **No of Days Delay from 1st Commitment** | Among that country's overdue orders, the oldest `Production Commitment Date` vs. today — the single worst delay, not an average. |
 | **New Committed Date** | The latest revised production date given to that country's overdue orders. |
 | **Container Expected Date** | The latest expected container date for those overdue orders. |
@@ -117,22 +117,30 @@ Countries are listed worst-first (highest Over Due Breakup at the top).
 
 For June (assume today is 22-06-2026), suppose these are the only rows:
 
-| Country | Quantity | Production Commitment Date | Loading Date | Clearance Status |
-|---|---|---|---|---|
-| UAE | 6 | 10-06-2026 | *(blank)* | Pending |
-| UAE | 4 | 18-06-2026 | 10-06-2026 | Completed |
-| Kenya | 3 | 02-06-2026 | *(blank)* | *(blank)* |
+| Country | Quantity | Production Commitment Date | Production Commitment Revise Date | Loading Date | Clearance Status |
+|---|---|---|---|---|---|
+| UAE | 6 | 10-06-2026 | *(blank)* | *(blank)* | Pending |
+| UAE | 4 | 18-06-2026 | *(blank)* | 10-06-2026 | Completed |
+| Kenya | 3 | 02-06-2026 | *(blank)* | *(blank)* | *(blank)* |
 
-- **UAE**: has one overdue row (qty 6, Production Commitment Date 10-06-2026)
-  and one on-time, shipped row. Over Due Breakup = **6**. Days Delay = **12**
-  (22-06 minus 10-06, from the one overdue row — the shipped row isn't
-  overdue so its date doesn't count). Machines pending (both prod &
-  container) = 6 (only the un-shipped row). Clearance Pending = 6 (the
-  un-shipped row's status is "Pending"; the shipped row is "Completed" so it
-  doesn't count).
-- **Kenya**: one overdue, unshipped row. Over Due Breakup = **3**. Days
-  Delay = **20** (22-06 minus 02-06). Machines pending = 3. Clearance
-  Pending = 3 (blank status counts as pending).
+- **UAE**: has one overdue row (qty 6, not yet shipped, no revise date so
+  falls back to Production Commitment Date 10-06-2026 — past today) and one
+  on-time, shipped row (shipped rows are never overdue, regardless of their
+  dates). Over Due Breakup = **6**. Days Delay = **12** (22-06 minus 10-06,
+  from the one overdue row). Machines pending (both prod & container) = 6
+  (only the un-shipped row). Clearance Pending = 6 (the un-shipped row's
+  status is "Pending"; the shipped row is "Completed" so it doesn't count).
+- **Kenya**: one overdue, unshipped row, no revise date. Over Due Breakup =
+  **3**. Days Delay = **20** (22-06 minus 02-06). Machines pending = 3.
+  Clearance Pending = 3 (blank status counts as pending).
+
+If a row *does* carry a Production Commitment Revise Date, Over Due Breakup
+checks that date instead of the original Production Commitment Date — the
+revise date wins whenever it's present, even if the original date hasn't
+arrived yet. Note that Days Delay always measures from the original
+Production Commitment Date regardless of which date decided Over Due Breakup,
+so a row that's only overdue because of its revise date can show up in Over
+Due Breakup while contributing 0 to that country's Days Delay.
 
 Kenya is worse on delay (20 days) but UAE has the bigger overdue quantity, so
 UAE is listed first (sorted by quantity, not by days late).
@@ -142,8 +150,10 @@ UAE is listed first (sorted by quantity, not by days late).
 - **Shipped/Despatched** = the `Loading (Dispatched) Date` cell holds an
   actual date in `DD-MM-YYYY` format. A blank cell or the word "Pending"
   both mean *not shipped*, even though they look different in the sheet.
-- **Overdue** = `over due days` is a number greater than 0. `0`, blank, or
-  text all mean *not overdue*.
+- **Overdue** (for Over Due Breakup) = not yet shipped, and the production
+  commitment date has passed: `Production Commitment Revise Date` if one's
+  been given, otherwise `Production Commitment Date`. The legacy `over due
+  days` column is no longer used by any KPI.
 - **Clearance done** = the status cell says (any case) one of: Completed,
   Complete, Cleared, Done, or Yes. Anything else — including a blank cell —
   counts as still pending.

@@ -33,7 +33,6 @@ COL_OVERDUE_DAYS = "over due days"
 COL_VESSEL_CUTOFF = "Vessel Cut-Off Date"
 COL_CLEARANCE_STATUS = "Commercial Clearance Status"
 # Columns referenced by the business-logic doc's breakup KPIs.
-COL_COMMITMENT_LOADING = "commitment of loading date"          # -> Overdue Breakup
 COL_REVISION_COMMITMENT_LOADING = "revision commitment of loading date"  # -> New Committed Date
 
 DATE_FORMAT = "%d-%m-%Y"  # sheet stores dates day-first (e.g. 07-07-2026)
@@ -157,12 +156,6 @@ def _dates(col: pd.Series) -> pd.Series:
     return pd.to_datetime(col, format=DATE_FORMAT, errors="coerce")
 
 
-def _blank_or_past(col: pd.Series) -> pd.Series:
-    """Mask: date cell is blank/unparseable OR earlier than today."""
-    parsed = _dates(col)
-    return parsed.isna() | (parsed < pd.Timestamp(date.today()))
-
-
 def _is_past(col: pd.Series) -> pd.Series:
     """Mask: date cell holds a real date earlier than today."""
     parsed = _dates(col)
@@ -172,6 +165,19 @@ def _is_past(col: pd.Series) -> pd.Series:
 def _is_blank_date(col: pd.Series) -> pd.Series:
     """Mask: date cell is blank/unparseable (no date committed)."""
     return _dates(col).isna()
+
+
+def _blank_or_fallback_past(primary: pd.Series, fallback: pd.Series) -> pd.Series:
+    """True where the primary date is past, falling back to the fallback date
+    when the primary cell is blank/unparseable.
+
+    An explicit primary date always wins, even over a past fallback date —
+    the fallback is only consulted when the primary gives no date at all.
+    """
+    primary_dates = _dates(primary)
+    fallback_dates = _dates(fallback)
+    effective = primary_dates.where(primary_dates.notna(), fallback_dates)
+    return effective.notna() & (effective < pd.Timestamp(date.today()))
 
 
 def _max_date(mask: pd.Series, *cols: pd.Series) -> str:
@@ -247,12 +253,19 @@ def compute_country_breakup(
     machine_readiness = _col(df, COL_MACHINE_READINESS)
 
     # Row masks, each straight from the doc's KPI definitions.
+    loading_date = _col(df, COL_LOADING_DATE)
     # KPI 2 — Pending Orders: loading date blank, OR the revised loading
     # commitment has already slipped past today.
-    pending_orders = _is_blank_date(_col(df, COL_LOADING_DATE)) | _is_past(
+    pending_orders = _is_blank_date(loading_date) | _is_past(
         _col(df, COL_REVISION_COMMITMENT_LOADING)
     )
-    overdue_breakup = _blank_or_past(_col(df, COL_COMMITMENT_LOADING))       # KPI 3
+    # KPI 3 — Over Due Breakup: not yet dispatched, AND overdue on production
+    # commitment — checked against the Production Commitment Revise Date if
+    # one's been given, falling back to the Production Commitment Date when
+    # no revise date has been set yet.
+    overdue_breakup = _is_blank_date(loading_date) & _blank_or_fallback_past(
+        _col(df, COL_MACHINE_REVISION), machine_readiness
+    )
     machine_revision_past = _is_past(_col(df, COL_MACHINE_REVISION))
     # KPI 7A — Prdn machines pending: no Production Commitment Date given yet,
     # OR one was given but has since been superseded by a Production
