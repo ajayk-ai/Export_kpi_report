@@ -78,20 +78,16 @@ def _breakup_text(breakup: list[dict]) -> str:
             f"ContainerExpected={b['container_expected_date'] or '-'}, "
             f"VesselCutOff={b['vessel_cutoff'] or '-'}, "
             f"Prdn(pending={b['prdn_machines_pending']}, "
-            f"changes={b['prdn_commitment_changes']}, "
-            f"overdue={b['prdn_overdue']}), "
+            f"changes={b['prdn_commitment_changes']}), "
             f"Container(pending={b['container_machines_pending']}, "
-            f"changes={b['container_commitment_changes']}, "
-            f"overdue={b['container_overdue']}), "
+            f"changes={b['container_commitment_changes']}), "
             f"ClearancePending={b['clearance_pending']}"
         )
     lines.append(
         f"- SUB TOTAL: Pending={totals['pending_orders']}, "
         f"OverDue={totals['over_due_breakup']}, "
-        f"Prdn(pending={totals['prdn_machines_pending']}, "
-        f"overdue={totals['prdn_overdue']}), "
-        f"Container(pending={totals['container_machines_pending']}, "
-        f"overdue={totals['container_overdue']}), "
+        f"Prdn(pending={totals['prdn_machines_pending']}), "
+        f"Container(pending={totals['container_machines_pending']}), "
         f"ClearancePending={totals['clearance_pending']}"
     )
     return "\n".join(lines)
@@ -103,9 +99,7 @@ _SUM_KEYS = (
     "pending_orders",
     "over_due_breakup",
     "prdn_machines_pending",
-    "prdn_overdue",
     "container_machines_pending",
-    "container_overdue",
     "clearance_pending",
 )
 
@@ -289,10 +283,8 @@ def _breakup_rows_html(breakup: list[dict]) -> str:
             f'<td style="{_TD}{_missed_date_style(b["container_expected_date"])}">{escape(b["container_expected_date"])}</td>'
             f'<td style="{_TD}{_machines_pending_style(b["prdn_machines_pending"])}">{_num(b["prdn_machines_pending"])}</td>'
             f'<td style="{_TD}">{_avg_num(b["prdn_commitment_changes"])}</td>'
-            f'<td style="{_TD}{_machines_pending_style(b["prdn_overdue"])}">{_num(b["prdn_overdue"])}</td>'
             f'<td style="{_TD}{_machines_pending_style(b["container_machines_pending"])}">{_num(b["container_machines_pending"])}</td>'
             f'<td style="{_TD}">{_avg_num(b["container_commitment_changes"])}</td>'
-            f'<td style="{_TD}{_machines_pending_style(b["container_overdue"])}">{_num(b["container_overdue"])}</td>'
             f'<td style="{_TD}{_vessel_cutoff_style(b["vessel_cutoff"])}">{escape(b["vessel_cutoff"])}</td>'
             f'<td style="{_TD}">{_num(b["clearance_pending"])}</td>'
             f"</tr>"
@@ -312,10 +304,8 @@ def _breakup_subtotal_html(breakup: list[dict]) -> str:
         f'<td style="{sub_td}"></td>'  # Container Expected Date
         f'<td style="{sub_td}">{t["prdn_machines_pending"]}</td>'
         f'<td style="{sub_td}"></td>'  # Prdn commitment changes (average)
-        f'<td style="{sub_td}">{t["prdn_overdue"]}</td>'
         f'<td style="{sub_td}">{t["container_machines_pending"]}</td>'
         f'<td style="{sub_td}"></td>'  # Container commitment changes (average)
-        f'<td style="{sub_td}">{t["container_overdue"]}</td>'
         f'<td style="{sub_td}"></td>'  # Vessel Cut off
         f'<td style="{sub_td}">{t["clearance_pending"]}</td>'
         f"</tr>"
@@ -335,7 +325,7 @@ def _breakup_section_html(breakup: list[dict]) -> str:
       <thead>
         <tr>
           <th colspan="5" style="{yellow_banner}">{_report_date()}</th>
-          <th colspan="8" style="{pink_banner}">Commitment not Given - Over Due days</th>
+          <th colspan="6" style="{pink_banner}">Commitment not Given - Over Due days</th>
         </tr>
         <tr>
           <th rowspan="2" style="{y}text-align:left;">Breakup - Dealer / Customer</th>
@@ -343,18 +333,16 @@ def _breakup_section_html(breakup: list[dict]) -> str:
           <th rowspan="2" style="{y}">No of Days Delay from 1st Committment</th>
           <th rowspan="2" style="{y}">New Committed Date</th>
           <th rowspan="2" style="{y}">Container Expected Date</th>
-          <th colspan="3" style="{p}">Prdn Committment Pending</th>
-          <th colspan="3" style="{p}">Container Committment Pending</th>
+          <th colspan="2" style="{p}">Prdn Committment Pending</th>
+          <th colspan="2" style="{p}">Container Committment Pending</th>
           <th rowspan="2" style="{p}">Vessel Cut off</th>
           <th rowspan="2" style="{p}">Commerical Clearance no of Pending</th>
         </tr>
         <tr>
           <th style="{p}">No of machines</th>
           <th style="{p}">No of commitment changes</th>
-          <th style="{p}">Production Overdue</th>
           <th style="{p}">No of machines</th>
           <th style="{p}">No of commitment changes</th>
-          <th style="{p}">Container Overdue</th>
         </tr>
       </thead>
       <tbody>

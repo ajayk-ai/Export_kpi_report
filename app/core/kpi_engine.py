@@ -28,6 +28,8 @@ COL_PRDN_CHANGES = (
 COL_CONTAINER_PLACEMENT = "Container Placement date"
 COL_CONTAINER_REVISION = "Container Revision Date"
 COL_CONTAINER_CHANGES = "no of comm container changes"
+COL_PRODUCTION_COMPLETION = "Production Completion Date"
+COL_ACTUAL_CONTAINER = "actual_container"
 COL_LOADING_DATE = "Loading (Dispatched) Date"
 COL_OVERDUE_DAYS = "over due days"
 COL_VESSEL_CUTOFF = "Vessel Cut-Off Date"
@@ -184,6 +186,15 @@ def _blank_or_fallback_past(primary: pd.Series, fallback: pd.Series) -> pd.Serie
     return effective.notna() & (effective < pd.Timestamp(date.today()))
 
 
+def _past_or_never_given(effective: pd.Series) -> pd.Series:
+    """True where a precomputed effective date (see ``_effective_dates``) is
+    either past, or was never given at all (no primary or fallback date) —
+    a commitment nobody has scheduled yet is still "pending", it just has
+    nothing to compare against today.
+    """
+    return effective.isna() | (effective < pd.Timestamp(date.today()))
+
+
 def _min_date(mask: pd.Series, *cols: pd.Series) -> str:
     """Earliest (min) date across the given columns for the masked rows.
 
@@ -271,36 +282,29 @@ def compute_country_breakup(
     overdue_breakup = _is_blank_date(loading_date) & _blank_or_fallback_past(
         machine_revision, machine_readiness
     )
-    machine_revision_past = _is_past(machine_revision)
-    # KPI 7A — Prdn machines pending: no Production Commitment Date given yet,
-    # OR that date has itself already passed — regardless of whether a Revise
-    # Date has been set, since a blank Revise Date only means "not yet
-    # revised," not "not pending" — OR a Revise Date was given and is itself
-    # now overdue. A blank Revise Date is ignored (doesn't by itself cause a
-    # pending count) as long as the Production Commitment Date is still in
-    # the future.
-    prdn_pending = (
-        _is_blank_date(machine_readiness)
-        | _is_past(machine_readiness)
-        | machine_revision_past
+    # KPI 7A — Prdn machines pending: production not actually complete yet
+    # (Production Completion Date is blank), AND the effective commitment
+    # date — Revise Date if one's been given, else the original Production
+    # Commitment Date — has already passed, OR no commitment date was ever
+    # given at all (nothing scheduled yet is still pending, not exempt).
+    production_complete = _col(df, COL_PRODUCTION_COMPLETION)
+    prdn_pending = _is_blank_date(production_complete) & _past_or_never_given(
+        effective_commitment_date
     )
-    prdn_overdue = machine_revision_past                                     # KPI 7C
     container_revision = _col(df, COL_CONTAINER_REVISION)
     # Effective container date per row: the Revision Date when one's been
     # given, else the (original) Container Placement date. Mirrors
     # effective_commitment_date above, just for the container KPIs.
     effective_container_date = _effective_dates(container_revision, container_placement)
-    # KPI 8A — Container machines pending: no placement date given yet, OR
-    # that date has itself already passed — and then, regardless of whether
-    # a Container Revision Date has been set, either a blank revision or a
-    # revision that's itself now overdue also counts as pending (same
-    # blank-or-past shape as KPI 7A, just nested under "placement is past"
-    # since a revision only exists once the original placement is overdue).
-    container_pending = _is_blank_date(container_placement) | (
-        _is_past(container_placement)
-        & (_is_blank_date(container_revision) | _is_past(container_revision))
+    # KPI 8A — Container machines pending: the container hasn't actually
+    # arrived yet (actual_container is blank), AND the effective container
+    # date — Revision Date if given, else the original Placement date — has
+    # already passed, OR no container date was ever given at all. Same shape
+    # as KPI 7A, just for the container side.
+    actual_container = _col(df, COL_ACTUAL_CONTAINER)
+    container_pending = _is_blank_date(actual_container) & _past_or_never_given(
+        effective_container_date
     )
-    container_overdue = _is_past(container_revision)                         # KPI 8C
     clearance_pending = _clearance_pending(_col(df, COL_CLEARANCE_STATUS))   # KPI 10
 
     results = []
@@ -308,12 +312,12 @@ def compute_country_breakup(
         if str(country).strip() == "":
             continue  # skip blank/unlabelled country rows
         rows = df.index.isin(idx)
-        # KPIs 4 and 7-10 all live under the report's single "Commitment not
-        # Given - Over Due days" banner alongside Over Due Breakup (KPI 3) —
-        # they're a breakdown OF that overdue population, not independent
-        # counts over the country's whole order book. Every one of them must
-        # be scoped to overdue_breakup, or (like here) they overcount against
-        # rows that already dispatched or were never overdue to begin with.
+        # KPIs 4-9 all live under the report's single "Commitment not Given -
+        # Over Due days" banner alongside Over Due Breakup (KPI 3) — they're
+        # a breakdown OF that overdue population, not independent counts over
+        # the country's whole order book. Every one of them must be scoped to
+        # overdue_breakup, or (like here) they overcount against rows that
+        # already dispatched or were never overdue to begin with.
         overdue_rows = rows & overdue_breakup
 
         def machines(mask: pd.Series, _rows: pd.Series = rows) -> int:
@@ -332,10 +336,8 @@ def compute_country_breakup(
                 "container_expected_date": _earliest_effective_date(overdue_rows, effective_container_date),  # KPI 6
                 "prdn_machines_pending": machines(prdn_pending, overdue_rows),     # KPI 7A
                 "prdn_commitment_changes": total(prdn_changes, overdue_rows),      # KPI 7B
-                "prdn_overdue": machines(prdn_overdue, overdue_rows),              # KPI 7C
                 "container_machines_pending": machines(container_pending, overdue_rows),  # KPI 8A
                 "container_commitment_changes": total(container_changes, overdue_rows),    # KPI 8B
-                "container_overdue": machines(container_overdue, overdue_rows),    # KPI 8C
                 "vessel_cutoff": _min_date(overdue_rows, vessel_cutoff),     # KPI 9
                 "clearance_pending": machines(clearance_pending, overdue_rows),    # KPI 10
             }

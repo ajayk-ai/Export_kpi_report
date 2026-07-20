@@ -18,7 +18,7 @@ sheet:
 1. **"How is our order book moving, month by month?"** — the 5-number KPI
    table (Opening / New / Total / Despatched / Balance).
 2. **"Which countries have pending or overdue orders right now, and why?"**
-   — the overdue breakup table, 13 numbers per country.
+   — the overdue breakup table, 11 numbers per country.
 
 An optional AI-written summary sits on top, calling out the trend and the
 biggest risk in a few sentences.
@@ -33,8 +33,10 @@ biggest risk in a few sentences.
 | `Country` | Which country/dealer's order this is — used to group the breakup table, one row per country. |
 | `Production Commitment Date` | When the machine was originally due to be ready. |
 | `Production Commitment Revise Date` | The factory's latest revised production commitment, when one has been given. Wins over the original date wherever both are used. |
+| `Production Completion Date` | When production actually finished. If this is filled in, the machine is no longer counted as "pending" on production — even if its commitment date has passed — because the work is genuinely done. |
 | `revision commitment of loading date` | A *different* column from the one above — this is the revised loading/despatch commitment. It only drives **Pending Orders**; nothing else reads it. |
 | `Container Placement date` / `Container Revision Date` | When the container is expected, and any revision to that date. |
+| `actual_container` | When the container actually arrived/was assigned. If this is filled in, the order is no longer counted as "pending" on the container — mirrors `Production Completion Date` above, just for the container side. |
 | `Vessel Cut-Off Date` | The shipping line's cut-off date for that order's vessel. |
 | `no of times commitment changes(prod)` | How many times the factory has pushed back its production commitment for that order. |
 | `no of comm container changes` | How many times the container commitment has changed for that order. |
@@ -148,8 +150,8 @@ One row per unique, non-blank `Country`. By default this table looks across
 booked months ago still shows up if it's still pending — set `REPORT_MONTH`
 if you want it scoped to a single month instead.
 
-Two of the thirteen numbers below (**Pending Orders** and **Over Due
-Breakup**) look at *all* of that country's rows. The other eleven are all
+Two of the eleven numbers below (**Pending Orders** and **Over Due
+Breakup**) look at *all* of that country's rows. The other nine are all
 scoped to that country's **currently overdue rows** (i.e. the rows counted
 in Over Due Breakup) — they're a breakdown of *why* those specific orders
 are overdue, not independent counts across the country's whole order book.
@@ -158,28 +160,39 @@ are overdue, not independent counts across the country's whole order book.
 > version of the report (console/email fallback) — it does not appear as a
 > column in the HTML table you see in the browser/email.
 
+> **There used to be a "Production Overdue" and a "Container Overdue"
+> column here too.** Both were removed — they were a narrower, and
+> confusingly named, subset of "No of machines pending" that only fired
+> once a *revision* date specifically existed and had slipped again. The
+> "No of machines pending" KPIs (6 and 8 below) now carry that signal, with
+> an extra check against whether the work is actually done yet.
+
 ### Shared example data — one country, used for every KPI below
 
-Assume **today is 17-Jul-2026**, and `Kenya` has exactly these 4 rows:
+Assume **today is 17-Jul-2026**, and `Kenya` has exactly these 5 rows:
 
-| Row | Qty | Loading Date | Prod. Commit. Date | Prod. Commit. Revise Date | Container Placement | Container Revision | Vessel Cut-Off | Prod. changes | Container changes | Clearance Status | revision commitment of loading date |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| A | 6 | *(blank)* | 05-06-2026 | *(blank)* | *(blank)* | *(blank)* | 20-07-2026 | 2 | 0 | Pending | *(blank)* |
-| B | 4 | *(blank)* | 01-05-2026 | 10-07-2026 | 15-06-2026 | *(blank)* | 18-07-2026 | 1 | 1 | Completed | 05-07-2026 |
-| C | 3 | 10-07-2026 | 01-06-2026 | *(blank)* | *(blank)* | *(blank)* | *(blank)* | 0 | 0 | Done | *(blank)* |
-| D | 5 | *(blank)* | *(blank)* | *(blank)* | 25-07-2026 *(future)* | *(blank)* | *(blank)* | 0 | 0 | *(blank)* | *(blank)* |
+| Row | Qty | Loading Date | Prod. Commit. Date | Prod. Commit. Revise Date | Prod. Completion Date | Container Placement | Container Revision | actual_container | Vessel Cut-Off | Prod. changes | Container changes | Clearance Status | revision commitment of loading date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A | 6 | *(blank)* | 05-06-2026 | *(blank)* | *(blank)* | *(blank)* | *(blank)* | *(blank)* | 20-07-2026 | 2 | 0 | Pending | *(blank)* |
+| B | 4 | *(blank)* | 01-05-2026 | 10-07-2026 | *(blank)* | 15-06-2026 | *(blank)* | *(blank)* | 18-07-2026 | 1 | 1 | Completed | 05-07-2026 |
+| C | 3 | 10-07-2026 | 01-06-2026 | *(blank)* | *(blank)* | *(blank)* | *(blank)* | *(blank)* | *(blank)* | 0 | 0 | Done | *(blank)* |
+| D | 5 | *(blank)* | *(blank)* | *(blank)* | *(blank)* | 25-07-2026 *(future)* | *(blank)* | *(blank)* | *(blank)* | 0 | 0 | *(blank)* | *(blank)* |
+| E | 7 | *(blank)* | 10-06-2026 | *(blank)* | 15-07-2026 | 12-07-2026 | *(blank)* | 18-07-2026 | 22-07-2026 | 1 | 2 | Completed | *(blank)* |
 
 Row C already shipped (10-07-2026 is a real, past date), so it's excluded
-from every "still pending" calculation below.
+from every "still pending" calculation below. Row E is deliberately built
+to show what "already done" looks like: it's late on its original
+commitment dates, but both `Production Completion Date` and
+`actual_container` are filled in — the work actually happened, it just
+happened after the original promise.
 
 ---
 
 **1. Pending Orders**
 **Formula:** `SUM(Quantity)` where Loading Date is blank **OR**
 `revision commitment of loading date` is a past date.
-**Worked example:** A (blank loading) + B (blank loading, and its
-revision-of-loading-date is also past) + D (blank loading) =
-6 + 4 + 5 = **15**. (C is shipped, so excluded.)
+**Worked example:** every row except C has a blank Loading Date:
+A (6) + B (4) + D (5) + E (7) = **22**. (C is shipped, so excluded.)
 
 **2. Over Due Breakup**
 **Formula:** `SUM(Quantity)` where Loading Date is blank **AND** the
@@ -192,15 +205,16 @@ back to `Production Commitment Date`.
 - D: no revise date and no original date either → no effective date at all
   → **not** counted (a commitment that was never given isn't "overdue" yet,
   it's just "pending" — see KPI 1).
+- E: no revise date → falls back to 10-06-2026, which is past → counts (7).
 
-Total = 6 + 4 = **10**. These two rows (A, B) are Kenya's "overdue rows" —
-every KPI below is scoped to just these two.
+Total = 6 + 4 + 7 = **17**. These three rows (A, B, E) are Kenya's "overdue
+rows" — every KPI below is scoped to just these three.
 
 **3. No of Days Delay from 1st Commitment**
 **Formula:** `today − MIN(Production Commitment Date)` among the overdue
-rows (A, B) — the single oldest date, not an average.
-**Worked example:** oldest of A's 05-06-2026 and B's 01-05-2026 is
-**01-05-2026**. 17-Jul-2026 − 01-May-2026 = **77 days**.
+rows (A, B, E) — the single oldest date, not an average.
+**Worked example:** oldest of A's 05-06-2026, B's 01-05-2026, and E's
+10-06-2026 is **01-05-2026**. 17-Jul-2026 − 01-May-2026 = **77 days**.
 
 **4. New Committed Date**
 **Formula:** the **earliest** effective commitment date among the overdue
@@ -208,84 +222,82 @@ rows (Revise Date if given, else original date). This is the *oldest*
 still-unresolved commitment, not the newest — despite the name, it
 highlights the worst-lagging promise, matching KPI 3 above.
 **Worked example:** A's effective date = 05-06-2026 (no revise, falls
-back). B's effective date = 10-07-2026 (has a revise date). Earliest of the
-two = **05-06-2026**.
+back). B's effective date = 10-07-2026 (has a revise date). E's effective
+date = 10-06-2026 (no revise, falls back). Earliest of the three =
+**05-06-2026**.
 
 **5. Container Expected Date**
 **Formula:** per row, the *effective* container date — `Container Revision
 Date` if one's been given, else `Container Placement date` — then the
 **earliest** such date among the overdue rows. Same fallback-then-earliest
 shape as New Committed Date (KPI 4), just for container dates.
-**Worked example:** neither A nor B has a Container Revision Date, so both
-fall back to their Placement date. A's placement is blank too (no effective
-date at all — excluded). B's placement is 15-06-2026 → effective date =
-15-06-2026. Earliest across the two = **15-06-2026**.
-
-*(If B instead had a Container Revision Date, say 05-06-2026, its effective
-date would switch to that revision date instead of its 15-06-2026
-placement date — the revision always wins over the placement date when
-both are present.)*
+**Worked example:** none of A, B, or E has a Container Revision Date, so
+all fall back to their Placement date. A's placement is blank too (no
+effective date at all — excluded). B's placement is 15-06-2026. E's
+placement is 12-07-2026. Earliest of the two available = **15-06-2026**.
 
 **6. Prdn Committment Pending → No of machines**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
-`Production Commitment Date` is blank or past, **OR** the Revise Date is
-past.
-**Worked example:** A: original date past → counts (6). B: original date
-past → counts (4). Total = **10**.
+`Production Completion Date` is blank **AND** (the effective commitment
+date — Revise Date if given, else original — is past, **or** no commitment
+date was ever given at all).
+**Worked example:**
+- A: completion blank, effective 05-06-2026 is past → counts (6).
+- B: completion blank, effective 10-07-2026 is past → counts (4).
+- E: `Production Completion Date` is filled in (15-07-2026) → **excluded
+  outright**, even though its own commitment date (10-06-2026) is also
+  past — the machine is actually done, so it isn't "pending" anymore.
+
+Total = 6 + 4 = **10**.
 
 **7. Prdn Committment Pending → No of commitment changes**
 **Formula:** `SUM(no of times commitment changes(prod))` across the
-overdue rows (this used to be an average across *all* rows; it is now a
-**sum across just the overdue rows**).
-**Worked example:** A (2) + B (1) = **3**.
+overdue rows (all three — this count isn't gated by completion status, it's
+just a history of how often the commitment moved).
+**Worked example:** A (2) + B (1) + E (1) = **4**.
 
-**8. Production Overdue**
+**8. Container Committment Pending → No of machines**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
-`Production Commitment Revise Date` specifically is past (a blank revise
-date does **not** count here, even though it counts in KPI 6 above).
-**Worked example:** A: revise date is blank → doesn't count (0). B: revise
-date 10-07-2026 is past → counts (4). Total = **4**.
+`actual_container` is blank **AND** (the effective container date —
+Revision Date if given, else Placement date — is past, **or** no container
+date was ever given at all).
+**Worked example:**
+- A: `actual_container` blank, and neither Container Revision nor Placement
+  was ever given → **counts anyway (6)** — a container nobody has even
+  scheduled yet is still pending, not exempt.
+- B: `actual_container` blank, effective placement 15-06-2026 is past →
+  counts (4).
+- E: `actual_container` is filled in (18-07-2026) → **excluded outright**,
+  even though its placement date (12-07-2026) is also past — the container
+  actually arrived.
 
-**9. Container Committment Pending → No of machines**
-**Formula:** among the overdue rows, `SUM(Quantity)` where the Container
-Placement date is blank, **or** it's past *and* the Container Revision Date
-is either blank or also past.
-**Worked example:** A: placement blank → counts (6). B: placement past,
-revision blank → counts (4). Total = **10**.
+Total = 6 + 4 = **10**.
 
-**10. Container Committment Pending → No of commitment changes**
+**9. Container Committment Pending → No of commitment changes**
 **Formula:** `SUM(no of comm container changes)` across the overdue rows
-(also a sum now, not an average).
-**Worked example:** A (0) + B (1) = **1**.
+(also not gated by `actual_container`).
+**Worked example:** A (0) + B (1) + E (2) = **3**.
 
-**11. Container Overdue**
-**Formula:** among the overdue rows, `SUM(Quantity)` where
-`Container Revision Date` specifically is past.
-**Worked example:** neither A nor B has a revision date set → **0**. (Note
-this is smaller than KPI 9's "no of machines pending" — a row can be
-*pending* a container commitment without yet being formally *overdue* on a
-revised container date.)
-
-**12. Vessel Cut off**
+**10. Vessel Cut off**
 **Formula:** the **earliest** `Vessel Cut-Off Date` among the overdue rows.
-**Worked example:** A = 20-07-2026, B = 18-07-2026 → earliest =
-**18-07-2026**.
+**Worked example:** A = 20-07-2026, B = 18-07-2026, E = 22-07-2026 →
+earliest = **18-07-2026**.
 
-**13. Commerical Clearance no of Pending**
+**11. Commerical Clearance no of Pending**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
 `Commercial Clearance Status` is blank or literally "Pending".
 **Worked example:** A: "Pending" → counts (6). B: "Completed" → doesn't
-count. Total = **6**.
+count. E: "Completed" → doesn't count. Total = **6**.
 
 ---
 
 So Kenya's printed row would read:
 
 ```
-Kenya: Pending=15, OverDue=10, DaysDelay=77, NewCommitted=05-06-2026,
+Kenya: Pending=22, OverDue=17, DaysDelay=77, NewCommitted=05-06-2026,
        ContainerExpected=15-06-2026, Vessel=18-07-2026,
-       Prdn(pending=10, changes=3, overdue=4),
-       Container(pending=10, changes=1, overdue=0),
+       Prdn(pending=10, changes=4),
+       Container(pending=10, changes=3),
        ClearancePending=6
 ```
 
@@ -295,11 +307,20 @@ still be listed below one with a bigger quantity but shorter delay.
 
 The **Sub Total** row at the bottom only totals the "count" columns
 (Pending Orders isn't shown there since it isn't in the HTML table either;
-Over Due Breakup, both "No of machines" pairs, both Overdue columns, and
-Clearance Pending are summed). Days Delay, the two "No of commitment
-changes" columns, and every date column are left blank in Sub Total — an
-oldest-date, a change count, or a date doesn't mean anything once you add it
-across countries.
+Over Due Breakup, both "No of machines" columns, and Clearance Pending are
+summed). Days Delay, the two "No of commitment changes" columns, and every
+date column are left blank in Sub Total — an oldest-date, a change count,
+or a date doesn't mean anything once you add it across countries.
+
+### One structural quirk worth knowing
+
+"Prdn – No of machines pending" can never fall into its own "no commitment
+date was ever given" branch — a row can only be in the overdue-rows group
+in the first place (KPI 2) if it *has* a real effective production
+commitment date. That branch only ever fires for **Container** pending
+(KPI 8), because a row's overdue status is decided entirely by its
+*production* dates — a row can be overdue on production while having zero
+container information at all, as row A shows above.
 
 ## 5. What counts as "shipped" / "overdue" / "clearance done"?
 
@@ -353,9 +374,18 @@ date among that country's currently overdue rows, i.e. the oldest
 unresolved promise. It's meant to line up with "Days Delay from 1st
 Commitment" (§4, KPI 3), which is also driven by the oldest date.
 
-**Why is "No of machines pending" bigger than "Overdue" for the same
-commitment (production or container)?**
-Pending counts a broader condition (no date given yet, *or* the date is
-past); Overdue only counts rows where a **revised** date has specifically
-been given and has itself now passed. A row that's late on its original
-date but hasn't been given a revision yet is pending, not yet overdue.
+**A row's commitment date is clearly in the past, but it's not counted in
+"No of machines pending" — why?**
+Check `Production Completion Date` (or `actual_container` for the
+container side). If either is filled in, the work is actually done, even
+though it happened after the original promise — so it's no longer
+"pending," it's just late history. See row E in the §4 worked example.
+
+**Why does a row with literally no commitment date show up in "No of
+machines pending" at all?**
+A machine with nothing scheduled yet — no original date, no revision — is
+still pending; there's just nothing to compare against today. This only
+ever shows up on the **container** side in practice (KPI 8), since a row
+can only be counted as overdue in the first place (KPI 2) if it has a real
+*production* commitment date — see "One structural quirk worth knowing" at
+the end of §4.
