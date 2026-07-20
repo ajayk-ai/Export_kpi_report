@@ -212,10 +212,19 @@ back). B's effective date = 10-07-2026 (has a revise date). Earliest of the
 two = **05-06-2026**.
 
 **5. Container Expected Date**
-**Formula:** the **latest** `Container Placement date` among the overdue
-rows. (Only the placement date feeds this — a Container Revision Date, even
-if present, isn't looked at here.)
-**Worked example:** A has none; B has 15-06-2026. Result = **15-06-2026**.
+**Formula:** per row, the *effective* container date — `Container Revision
+Date` if one's been given, else `Container Placement date` — then the
+**earliest** such date among the overdue rows. Same fallback-then-earliest
+shape as New Committed Date (KPI 4), just for container dates.
+**Worked example:** neither A nor B has a Container Revision Date, so both
+fall back to their Placement date. A's placement is blank too (no effective
+date at all — excluded). B's placement is 15-06-2026 → effective date =
+15-06-2026. Earliest across the two = **15-06-2026**.
+
+*(If B instead had a Container Revision Date, say 05-06-2026, its effective
+date would switch to that revision date instead of its 15-06-2026
+placement date — the revision always wins over the placement date when
+both are present.)*
 
 **6. Prdn Committment Pending → No of machines**
 **Formula:** among the overdue rows, `SUM(Quantity)` where

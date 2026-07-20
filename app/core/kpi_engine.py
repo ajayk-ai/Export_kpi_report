@@ -184,20 +184,6 @@ def _blank_or_fallback_past(primary: pd.Series, fallback: pd.Series) -> pd.Serie
     return effective.notna() & (effective < pd.Timestamp(date.today()))
 
 
-def _max_date(mask: pd.Series, *cols: pd.Series) -> str:
-    """Latest (max) date across the given columns for the masked rows.
-
-    Returns a ``DD-MM-YYYY`` string, or "" when none of the cells hold a date.
-    """
-    best = None
-    for col in cols:
-        parsed = pd.to_datetime(col[mask], format=DATE_FORMAT, errors="coerce").dropna()
-        if not parsed.empty:
-            candidate = parsed.max()
-            best = candidate if best is None else max(best, candidate)
-    return best.strftime(DATE_FORMAT) if best is not None else ""
-
-
 def _min_date(mask: pd.Series, *cols: pd.Series) -> str:
     """Earliest (min) date across the given columns for the masked rows.
 
@@ -300,6 +286,10 @@ def compute_country_breakup(
     )
     prdn_overdue = machine_revision_past                                     # KPI 7C
     container_revision = _col(df, COL_CONTAINER_REVISION)
+    # Effective container date per row: the Revision Date when one's been
+    # given, else the (original) Container Placement date. Mirrors
+    # effective_commitment_date above, just for the container KPIs.
+    effective_container_date = _effective_dates(container_revision, container_placement)
     # KPI 8A — Container machines pending: no placement date given yet, OR
     # that date has itself already passed — and then, regardless of whether
     # a Container Revision Date has been set, either a blank revision or a
@@ -339,7 +329,7 @@ def compute_country_breakup(
                 "over_due_breakup": machines(overdue_breakup),       # KPI 3
                 "days_delay": _worst_delay_days(overdue_rows, machine_readiness),  # KPI 4
                 "new_committed_date": _earliest_effective_date(overdue_rows, effective_commitment_date),  # KPI 5
-                "container_expected_date": _max_date(overdue_rows, container_placement),     # KPI 6
+                "container_expected_date": _earliest_effective_date(overdue_rows, effective_container_date),  # KPI 6
                 "prdn_machines_pending": machines(prdn_pending, overdue_rows),     # KPI 7A
                 "prdn_commitment_changes": total(prdn_changes, overdue_rows),      # KPI 7B
                 "prdn_overdue": machines(prdn_overdue, overdue_rows),              # KPI 7C
