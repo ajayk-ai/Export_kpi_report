@@ -15,6 +15,10 @@ MONTH_NUM = {
 
 # Raw sheet column headers (SCM_Export tab, columns A–T). Kept here so a header
 # rename in the sheet is a one-line fix.
+# The reporting year the row belongs to. The planning team enters this per row;
+# it's what keeps a later year's reused MAY/JUNE/JULY labels from merging into
+# this year's buckets (see _for_year / latest_year).
+COL_YEAR = "Year"
 COL_COUNTRY = "Country"
 COL_QUANTITY = "Quantity"
 COL_MACHINE_REVISION = "production commitment Revise Date"
@@ -80,11 +84,43 @@ def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> d
     }
 
 
-def latest_month(df: pd.DataFrame) -> str:
+def latest_year(df: pd.DataFrame) -> int:
+    """The most recent reporting year in the sheet's ``Year`` column.
+
+    This is what makes the report "current year only": everything downstream is
+    scoped to this year (see ``_for_year``). Falls back to the current calendar
+    year when the column is missing or holds no usable year, so an old sheet
+    without a Year column keeps behaving exactly as it did before.
+    """
+    years = pd.to_numeric(df.get(COL_YEAR, pd.Series(dtype=str)), errors="coerce").dropna()
+    return int(years.max()) if not years.empty else date.today().year
+
+
+def _for_year(df: pd.DataFrame, year: int) -> pd.DataFrame:
+    """Only the rows whose ``Year`` column matches ``year``.
+
+    Two safety fallbacks keep this from ever blanking a report by accident:
+    if the sheet has no Year column, or the column is present but entirely
+    blank, every row is kept (the old single-year behaviour). Rows left blank
+    while other rows are filled are treated as unlabelled and excluded — fill
+    the Year on every row so nothing is silently dropped.
+    """
+    if COL_YEAR not in df.columns:
+        return df
+    years = pd.to_numeric(df[COL_YEAR], errors="coerce")
+    if years.notna().sum() == 0:
+        return df
+    return df[years == year]
+
+
+def latest_month(df: pd.DataFrame, year: int | None = None) -> str:
     """The most recent month present in the data, per ``MONTH_ORDER``.
 
-    Falls back to the last configured month if the sheet has none of them.
+    Scoped to ``year`` (default: the latest year in the sheet) so the label
+    reflects the year actually being reported. Falls back to the last configured
+    month if that year has none of them.
     """
+    df = _for_year(df, year if year is not None else latest_year(df))
     present = set(df.get("Month", pd.Series(dtype=str)).astype(str).str.strip().str.upper())
     for month in reversed(MONTH_ORDER):
         if month in present:
@@ -92,12 +128,20 @@ def latest_month(df: pd.DataFrame) -> str:
     return MONTH_ORDER[-1]
 
 
-def compute_all_kpis(df: pd.DataFrame) -> list[dict]:
-    """Compute KPIs for each month in MONTH_ORDER, carrying balance forward."""
+def compute_all_kpis(df: pd.DataFrame, year: int | None = None) -> list[dict]:
+    """Compute KPIs for each month in MONTH_ORDER, carrying balance forward.
+
+    Scoped to a single reporting ``year`` (default: the latest year in the
+    sheet's ``Year`` column) so a later year's reused MAY/JUNE/JULY labels never
+    merge into this year's buckets. Each returned row carries its ``year``.
+    """
+    year = year if year is not None else latest_year(df)
+    df = _for_year(df, year)
     results = []
     prev_balance = 0
     for month in MONTH_ORDER:
         kpi = compute_month_kpis(df, month, prev_balance)
+        kpi["year"] = year
         results.append(kpi)
         prev_balance = kpi["balance"]
     return results
@@ -236,16 +280,19 @@ def _worst_delay_days(mask: pd.Series, col: pd.Series) -> int:
 
 
 def compute_country_breakup(
-    df: pd.DataFrame, month: str | None = None
+    df: pd.DataFrame, month: str | None = None, year: int | None = None
 ) -> list[dict]:
     """Per-country breakup dashboard, one row per unique Country.
 
     Every KPI follows the business-logic doc (``logic_docs/Export Kpi
-    project.docx``). If ``month`` is given, only that month's rows are
-    considered. All "count" KPIs are expressed in machines (sum of Quantity over
-    the matching rows); the "commitment changes" KPIs are sums of their
-    respective change-count columns across the country's overdue rows.
+    project.docx``). Rows are first scoped to the reporting ``year`` (default:
+    the latest year in the sheet's ``Year`` column). If ``month`` is given, only
+    that month's rows are considered. All "count" KPIs are expressed in machines
+    (sum of Quantity over the matching rows); the "commitment changes" KPIs are
+    sums of their respective change-count columns across the country's overdue
+    rows.
     """
+    df = _for_year(df, year if year is not None else latest_year(df))
     if df.empty or COL_COUNTRY not in df.columns:
         return []
 

@@ -47,6 +47,11 @@ COLUMNS = [
     "over due days",
     "Vessel Cut-Off Date",                   # -> Vessel Cut-Off (max)
     "Commercial Clearance Status",           # "Pending"/blank -> Clearance Pending
+    # Reporting year the row belongs to. Appended LAST on purpose: the onEdit
+    # Apps Script (appscript/code.gs) addresses columns by number, so inserting
+    # this mid-sheet would shift them. The planning team fills it per row; the
+    # report auto-scopes to the latest year present (see kpi_engine.latest_year).
+    "Year",
 ]
 
 # Model -> (Dealer, FOB Price). One source of truth so a model's dealer/price is
@@ -68,7 +73,7 @@ MODELS = {
 }
 
 
-def _row(month, country, model, qty, *, readiness="", machine_revision="",
+def _row(month, country, model, qty, *, year=2026, readiness="", machine_revision="",
          prdn_changes=0, production_completion="", backlog=0,
          container_placement="", container_revision="", actual_container="",
          container_changes=0, commitment_loading="", revision_commitment_loading="",
@@ -100,6 +105,7 @@ def _row(month, country, model, qty, *, readiness="", machine_revision="",
         "over due days": overdue_days,
         "Vessel Cut-Off Date": vessel,
         "Commercial Clearance Status": clearance,
+        "Year": year,
     }
 
 

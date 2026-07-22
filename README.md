@@ -99,6 +99,43 @@ app/
     email_client.py         Send the report over SMTP (HTML + text fallback)
 ```
 
+## Production: daily 4pm email (Windows Task Scheduler)
+
+Registers a Windows scheduled task that runs `main.py --send` once a day at
+**16:00 (4:00 PM) India Standard Time**, using the project's own `.venv` (no
+reliance on `uv`/PATH being set up in the task's environment). To change the
+send time, edit `$reportHour` / `$reportMinute` at the top of
+`deploy\register_task.ps1` and re-run it.
+
+1. Make sure `.env` is filled in and `uv sync` has been run on this machine
+   (i.e. `.venv\Scripts\python.exe` exists).
+2. From an **elevated** (Run as Administrator) PowerShell, from the project
+   root:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File deploy\register_task.ps1
+   ```
+
+   This creates a task named `ExportKPIDailyReport` that runs as `SYSTEM` (so
+   it fires even if nobody is logged in), at 16:00 IST converted to the
+   server's own local timezone — if the server isn't set to IST, the script
+   computes and registers the equivalent local time for you.
+3. Test it immediately (this sends a real email):
+
+   ```powershell
+   Start-ScheduledTask -TaskName "ExportKPIDailyReport"
+   ```
+
+4. Check `logs\daily_report.log` for a timestamped "sent OK" / "FAILED" line
+   after each run (scheduled or manual).
+
+Re-run `deploy\register_task.ps1` any time to update the schedule (e.g. after
+moving the project folder). Remove the task with:
+
+```powershell
+Unregister-ScheduledTask -TaskName "ExportKPIDailyReport"
+```
+
 ## Security
 
 `.env` and `config/*.json` are gitignored — never commit your service account

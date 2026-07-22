@@ -12,3 +12,6 @@ wheels/
 # Secrets & local config
 .env
 config/*.json
+
+# Scheduled-task run logs
+logs/

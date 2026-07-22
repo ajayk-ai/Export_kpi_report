@@ -41,11 +41,13 @@ def text_summary(
     kpis: list[dict],
     breakup: list[dict] | None = None,
     ai_summary: str = "",
+    year: int | None = None,
 ) -> str:
     """Plain-text version, used as the email fallback and for console output.
 
     Shows every month's KPI line so the opening/balance carry-forward trend is
-    visible; the breakup below is already scoped to its target month.
+    visible; the breakup below is already scoped to its target month. ``year``
+    (the reporting year the figures cover) is shown as a heading when given.
     """
     lines = [
         f"{k['month']}: "
@@ -57,10 +59,12 @@ def text_summary(
         for k in kpis
     ]
     body = "\n".join(lines)
-    if ai_summary:
-        body = f"AI Summary:\n{ai_summary}\n\n{body}"
+    if year is not None:
+        body = f"Reporting Year: {year}\n\n{body}"
     if breakup:
         body = f"{body}\n\n{_breakup_text(breakup)}"
+    if ai_summary:
+        body = f"{body}\n\nAI Summary:\n{ai_summary}"
     return body
 
 
@@ -195,7 +199,7 @@ def _ai_section_html(ai_summary: str) -> str:
         return ""
     return (
         f'<div style="background:{_AI_BG};border-left:4px solid {_ACCENT};'
-        f'padding:14px 18px;margin:0 0 22px 0;border-radius:6px;">'
+        f'padding:14px 18px;margin:22px 0 0 0;border-radius:6px;">'
         f'<div style="font-weight:700;color:{_ACCENT};margin-bottom:6px;">🤖 AI Summary (Gemini)</div>'
         f"{_ai_body_html(ai_summary)}"
         f"</div>"
@@ -358,21 +362,28 @@ def html_report(
     breakup: list[dict] | None = None,
     ai_summary: str = "",
     month: str | None = None,
+    year: int | None = None,
 ) -> str:
     """A self-contained, inline-styled HTML report suitable for email."""
+    year_label = f" &middot; {year}" if year is not None else ""
+    summary_heading = (
+        f'<div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;">'
+        f'Monthly Summary{f" — {year}" if year is not None else ""}</div>'
+    )
     return f"""\
 <div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:1100px;margin:0 auto;color:#111827;">
   <div style="background:{_HEADER_BG};padding:22px 24px;border-radius:8px 8px 0 0;">
-    <div style="color:#ffffff;font-size:20px;font-weight:700;">Export KPI Report</div>
+    <div style="color:#ffffff;font-size:20px;font-weight:700;">Export KPI Report{year_label}</div>
     <div style="color:#9ca3af;font-size:13px;margin-top:4px;">Generated on {date.today():%d %b %Y}</div>
   </div>
   <div style="border:1px solid {_BORDER};border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-    {_ai_section_html(ai_summary)}
+    {summary_heading}
     {_summary_table_html(kpis)}
     {_breakup_section_html(breakup or [])}
     <div style="color:#9ca3af;font-size:12px;margin-top:18px;">
       Balance = Total Order − Despatched. Over Due Breakup and the commitment
       columns cover {escape(month) if month else "all months, as of today"}.
     </div>
+    {_ai_section_html(ai_summary)}
   </div>
 </div>"""

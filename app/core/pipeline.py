@@ -13,7 +13,12 @@ from ..clients.email_client import send_summary_email
 from ..clients.gemini_client import generate_summary
 from ..clients.sheets_client import get_data_as_dataframe
 from ..config import settings
-from .kpi_engine import compute_all_kpis, compute_country_breakup, latest_month
+from .kpi_engine import (
+    compute_all_kpis,
+    compute_country_breakup,
+    latest_month,
+    latest_year,
+)
 from .report import html_report, text_summary
 
 
@@ -22,6 +27,7 @@ class ReportResult:
     """Everything a single pipeline run produces, ready to print/serve/email."""
 
     month: str
+    year: int
     kpis: list[dict]
     breakup: list[dict]
     ai_summary: str
@@ -46,19 +52,24 @@ def build_report(
     if df is None:
         df = get_data_as_dataframe(settings.sheet_id, settings.worksheet_name)
 
-    kpis = compute_all_kpis(df)
+    # The reporting year: the latest year the planning team has entered in the
+    # sheet's Year column (today's year if the column is absent/blank). Every
+    # section below is scoped to it, so accumulating live data across years
+    # never merges a later year's MAY/JUNE/JULY into this report.
+    report_year = latest_year(df)
+    kpis = compute_all_kpis(df, year=report_year)
     # Label for the monthly-summary section and the email subject.
-    report_month = month or settings.report_month or latest_month(df)
+    report_month = month or settings.report_month or latest_month(df, report_year)
     # The per-country breakup spans ALL months by default: an order booked in a
     # prior month can still be pending/overdue today, so scoping to one month
     # would hide it. Pass an explicit `month` (or set REPORT_MONTH) to scope it.
     breakup_month = month or settings.report_month or None  # None/"" -> all data
-    breakup = compute_country_breakup(df, month=breakup_month)
+    breakup = compute_country_breakup(df, month=breakup_month, year=report_year)
     ai_summary = generate_summary(kpis, breakup) if use_ai else ""
 
-    text = text_summary(kpis, breakup, ai_summary)
-    html = html_report(kpis, breakup, ai_summary, month=breakup_month)
-    return ReportResult(report_month, kpis, breakup, ai_summary, text, html)
+    text = text_summary(kpis, breakup, ai_summary, year=report_year)
+    html = html_report(kpis, breakup, ai_summary, month=breakup_month, year=report_year)
+    return ReportResult(report_month, report_year, kpis, breakup, ai_summary, text, html)
 
 
 def run(send: bool = False, df: pd.DataFrame | None = None) -> str:

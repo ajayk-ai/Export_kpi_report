@@ -78,6 +78,7 @@ def report_json(
     return JSONResponse(
         {
             "month": result.month,
+            "year": result.year,
             "kpis": result.kpis,
             "breakup": result.breakup,
             "ai_summary": result.ai_summary,

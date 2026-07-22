@@ -13,7 +13,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.core.kpi_engine import compute_all_kpis, compute_country_breakup, latest_month
+from app.core.kpi_engine import (
+    compute_all_kpis,
+    compute_country_breakup,
+    latest_month,
+    latest_year,
+)
 from app.core.report import html_report, text_summary
 
 DEFAULT_FILE = Path(__file__).resolve().parent / "data" / "test_data.xlsx"
@@ -29,12 +34,13 @@ def main() -> None:
     # sheet to the pipeline (dates stay 'DD-MM-YYYY' strings, blanks stay blank).
     df = pd.read_excel(path, dtype=str).fillna("")
 
-    kpis = compute_all_kpis(df)
-    month = latest_month(df)
-    breakup = compute_country_breakup(df, month=month)
+    year = latest_year(df)
+    kpis = compute_all_kpis(df, year=year)
+    month = latest_month(df, year)
+    breakup = compute_country_breakup(df, month=month, year=year)
 
     # No AI summary here — keep the local run fully offline.
-    text = text_summary(kpis, breakup, ai_summary="")
+    text = text_summary(kpis, breakup, ai_summary="", year=year)
     print(text)
     print("\n--- monthly KPIs (balance must never be negative) ---")
     for k in kpis:
@@ -45,7 +51,7 @@ def main() -> None:
             f"balance={k['balance']:>4}{flag}"
         )
 
-    html = html_report(kpis, breakup, ai_summary="", month=month)
+    html = html_report(kpis, breakup, ai_summary="", month=month, year=year)
     PREVIEW.write_text(html, encoding="utf-8")
     print(f"\nHTML preview written to: {PREVIEW}")
     try:
