@@ -360,14 +360,27 @@ function escapeHtml(s) {
   });
 }
 
-/** Index of `header` in `headers` (whitespace-trimmed), or -1 if absent. */
+/**
+ * Index of `header` in `headers`, or -1 if absent. Normalizes the same way
+ * as getHeaders() in code.gs (strips non-breaking spaces, trims, collapses
+ * internal double spaces) so both scripts agree on what a header "is" even
+ * when the sheet has stray/doubled whitespace (e.g. the real
+ * "no of commitment loading  changes" header has a double space).
+ */
 function findColumnIndex_(headers, header) {
   for (var i = 0; i < headers.length; i++) {
-    if (String(headers[i]).trim() === header) {
+    if (normalizeHeader_(headers[i]) === header) {
       return i;
     }
   }
   return -1;
+}
+
+function normalizeHeader_(value) {
+  return String(value)
+    .replace(/\u00A0/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 /**************************************************************
