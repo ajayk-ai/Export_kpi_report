@@ -38,6 +38,7 @@ class Settings:
     worksheet_name: str
     delegated_user: str  # impersonate via domain-wide delegation; "" to disable
     report_month: str  # month to filter the country breakup on; "" = latest in data
+    report_year: int | None  # reporting year; None = auto (latest year in data)
     filter_webapp_url: str  # Apps Script Web App /exec URL; "" disables the links
 
     # Email (SMTP)
@@ -56,6 +57,7 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         smtp_user = os.getenv("SMTP_USER", "")
+        report_year_raw = os.getenv("REPORT_YEAR", "").strip()
         return cls(
             service_account_file=_resolve_path(
                 os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "config/service.json")
@@ -64,6 +66,7 @@ class Settings:
             worksheet_name=os.getenv("WORKSHEET_NAME", "SCM_Export"),
             delegated_user=os.getenv("GOOGLE_DELEGATED_USER", ""),
             report_month=os.getenv("REPORT_MONTH", "").strip(),
+            report_year=int(report_year_raw) if report_year_raw else None,
             filter_webapp_url=os.getenv("FILTER_WEBAPP_URL", "").strip(),
             smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
             smtp_port=int(os.getenv("SMTP_PORT", "465")),

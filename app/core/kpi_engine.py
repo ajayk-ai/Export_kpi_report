@@ -3,15 +3,45 @@ from datetime import date
 
 import pandas as pd
 
-MONTH_ORDER = ["MAY", "JUNE", "JULY"]  # extend as needed
-
-# Month name -> calendar number, used to tell which calendar month a Loading
-# (Dispatched) Date actually falls in (see _is_dispatched_in_month).
+# Month name -> calendar number, used both to order MONTH_ORDER below and to
+# tell which calendar month a Loading (Dispatched) Date actually falls in (see
+# _is_dispatched_in_year_month).
 MONTH_NUM = {
     "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4, "MAY": 5, "JUNE": 6,
     "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11,
     "DECEMBER": 12,
 }
+
+# All 12 calendar months, in order. Derived from MONTH_NUM so the two can
+# never drift apart.
+MONTH_ORDER = sorted(MONTH_NUM, key=MONTH_NUM.get)
+
+# Every string that should resolve to a given month: the full name, its
+# 3-letter abbreviation, and its 1/2-digit calendar number (all matched
+# case/whitespace-insensitively by normalize_month).
+_MONTH_ALIASES = {
+    full: {full, full[:3], str(num), f"{num:02d}"}
+    for full, num in MONTH_NUM.items()
+}
+_MONTH_LOOKUP = {
+    alias: full for full, aliases in _MONTH_ALIASES.items() for alias in aliases
+}
+
+
+def normalize_month(value: str | int | None) -> str | None:
+    """Resolve flexible month input to its canonical MONTH_ORDER name.
+
+    Accepts a full name ("July"/"JULY"/" july "), a 3-letter abbreviation
+    ("Jul"/"JUL"), or a calendar number ("7", "07", 7). Returns ``None`` if
+    ``value`` is blank or doesn't match any of the above, so callers can
+    surface a clear error instead of silently matching nothing.
+    """
+    if value is None:
+        return None
+    key = str(value).strip().upper()
+    if not key:
+        return None
+    return _MONTH_LOOKUP.get(key)
 
 # Raw sheet column headers (SCM_Export tab, columns A–T). Kept here so a header
 # rename in the sheet is a one-line fix.
@@ -48,7 +78,7 @@ DATE_FORMAT = "%d-%m-%Y"  # sheet stores dates day-first (e.g. 07-07-2026)
 _CLEARANCE_PENDING_VALUES = {"pending", "", "nan", "none"}
 
 
-def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> dict:
+def compute_month_kpis(df: pd.DataFrame, month: str, year: int, prev_balance: int = 0) -> dict:
     # Opening order carries over from the previous month's balance. Balance is
     # always >= 0 (see below), so opening order is never negative either.
     opening_order = prev_balance
@@ -69,7 +99,7 @@ def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> d
     # booked in. Orders carry forward from a prior month's Balance and often
     # ship later than their own Month bucket, so despatch has to be attributed
     # to the month it really happened in, not the order's booking month.
-    dispatched_mask = _is_dispatched_in_month(_col(df, COL_LOADING_DATE), month)
+    dispatched_mask = _is_dispatched_in_year_month(_col(df, COL_LOADING_DATE), year, month)
     dispatched = int(qty[dispatched_mask].sum())
 
     balance = total_order - dispatched
@@ -84,14 +114,45 @@ def compute_month_kpis(df: pd.DataFrame, month: str, prev_balance: int = 0) -> d
     }
 
 
+def _is_future_period(df: pd.DataFrame) -> pd.Series:
+    """True where a row's (Year, Month) hasn't started yet as of today.
+
+    Lets a team pre-stage a future order in the sheet (a forecasted Month/Year
+    with a quantity, dispatch still blank) without it counting as a current new
+    or pending order — it's simply not "now" yet. Rows with a missing or
+    unparseable Year or Month are treated as NOT future (kept), the same
+    "don't silently drop data" fallback ``_for_year`` uses.
+    """
+    today = date.today()
+    years = pd.to_numeric(df.get(COL_YEAR, pd.Series(dtype=str, index=df.index)), errors="coerce")
+    months = _col(df, "Month").astype(str).str.strip().str.upper().map(MONTH_NUM)
+    known = years.notna() & months.notna()
+    future = known & ((years > today.year) | ((years == today.year) & (months > today.month)))
+    return future.fillna(False)
+
+
+def _drop_future_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose (Year, Month) is a period that hasn't started yet.
+
+    Applied at every KPI entry point (``latest_year``, ``latest_month``,
+    ``compute_all_kpis``, ``compute_country_breakup``) so a pre-staged future
+    order can never inflate a new-order count, pad out the monthly summary
+    with extra rows, or get flagged pending/overdue before its time.
+    """
+    return df[~_is_future_period(df)]
+
+
 def latest_year(df: pd.DataFrame) -> int:
     """The most recent reporting year in the sheet's ``Year`` column.
 
     This is what makes the report "current year only": everything downstream is
     scoped to this year (see ``_for_year``). Falls back to the current calendar
     year when the column is missing or holds no usable year, so an old sheet
-    without a Year column keeps behaving exactly as it did before.
+    without a Year column keeps behaving exactly as it did before. Rows for a
+    period that hasn't started yet (see ``_drop_future_rows``) are ignored, so
+    a pre-staged future order can't make the report jump ahead of itself.
     """
+    df = _drop_future_rows(df)
     years = pd.to_numeric(df.get(COL_YEAR, pd.Series(dtype=str)), errors="coerce").dropna()
     return int(years.max()) if not years.empty else date.today().year
 
@@ -118,8 +179,11 @@ def latest_month(df: pd.DataFrame, year: int | None = None) -> str:
 
     Scoped to ``year`` (default: the latest year in the sheet) so the label
     reflects the year actually being reported. Falls back to the last configured
-    month if that year has none of them.
+    month if that year has none of them. Future-period rows are ignored (see
+    ``_drop_future_rows``), so a pre-staged future month can't get picked as
+    the "latest" one before it actually arrives.
     """
+    df = _drop_future_rows(df)
     df = _for_year(df, year if year is not None else latest_year(df))
     present = set(df.get("Month", pd.Series(dtype=str)).astype(str).str.strip().str.upper())
     for month in reversed(MONTH_ORDER):
@@ -128,23 +192,65 @@ def latest_month(df: pd.DataFrame, year: int | None = None) -> str:
     return MONTH_ORDER[-1]
 
 
-def compute_all_kpis(df: pd.DataFrame, year: int | None = None) -> list[dict]:
-    """Compute KPIs for each month in MONTH_ORDER, carrying balance forward.
+def _earliest_year(df: pd.DataFrame, default: int) -> int:
+    """The earliest reporting year in the sheet's ``Year`` column, or ``default``
+    when the column is absent/blank."""
+    years = pd.to_numeric(df.get(COL_YEAR, pd.Series(dtype=str)), errors="coerce").dropna()
+    return int(years.min()) if not years.empty else default
 
-    Scoped to a single reporting ``year`` (default: the latest year in the
-    sheet's ``Year`` column) so a later year's reused MAY/JUNE/JULY labels never
-    merge into this year's buckets. Each returned row carries its ``year``.
+
+def compute_all_kpis(df: pd.DataFrame, year: int | None = None) -> list[dict]:
+    """Compute KPIs for each month of ``year``, carrying balance forward.
+
+    Balance/opening-order carries forward continuously across BOTH months and
+    years: a pending order (blank Loading Date) logged in December of one year
+    must still count as January's opening balance the next year, and keep
+    rolling forward — a year boundary is not a reset. To get that right, every
+    year from the earliest one present in the sheet through the target
+    ``year`` is walked chronologically (12 months each), but only the target
+    year's rows are returned; earlier years are computed solely to seed the
+    correct running balance.
+
+    ``year`` defaults to the latest year in the sheet's ``Year`` column. Each
+    returned row carries its ``year``. The result is trimmed on both ends: it
+    stops at the latest month that actually has data in the target year (via
+    ``latest_month``), so a report doesn't show empty future months; and it
+    skips leading months that are both dataless (no new orders) AND carry no
+    balance forward (a zero opening order), so a year that starts reporting
+    partway through (e.g. business data beginning in May) doesn't pad the
+    table with meaningless January-April zero rows. A month with a non-zero
+    opening order is always kept, even with no new orders of its own, since
+    that's exactly how a pending order carried from a prior year is shown.
+    Rows pre-staged for a period that hasn't started yet are ignored (see
+    ``_drop_future_rows``) — a forecasted order doesn't count until its own
+    month/year actually arrives.
     """
-    year = year if year is not None else latest_year(df)
-    df = _for_year(df, year)
+    df = _drop_future_rows(df)
+    target_year = year if year is not None else latest_year(df)
+    start_year = _earliest_year(df, target_year)
+
     results = []
     prev_balance = 0
-    for month in MONTH_ORDER:
-        kpi = compute_month_kpis(df, month, prev_balance)
-        kpi["year"] = year
-        results.append(kpi)
-        prev_balance = kpi["balance"]
-    return results
+    for y in range(start_year, target_year + 1):
+        year_df = _for_year(df, y)
+        for month in MONTH_ORDER:
+            kpi = compute_month_kpis(year_df, month, y, prev_balance)
+            prev_balance = kpi["balance"]
+            if y == target_year:
+                kpi["year"] = y
+                results.append(kpi)
+
+    cutoff = MONTH_ORDER.index(latest_month(df, target_year)) + 1
+    results = results[:cutoff]
+
+    start = 0
+    for i, kpi in enumerate(results):
+        if kpi["new_order"] != 0 or kpi["opening_order"] != 0:
+            start = i
+            break
+    else:
+        start = max(0, len(results) - 1)
+    return results[start:]
 
 
 def _col(df: pd.DataFrame, name: str | tuple[str, ...]) -> pd.Series:
@@ -166,28 +272,30 @@ def _to_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(0)
 
 
-def _is_dispatched_in_month(loading: pd.Series, month: str) -> pd.Series:
-    """True where the row's Loading (Dispatched) Date actually falls in ``month``.
+def _is_dispatched_in_year_month(loading: pd.Series, year: int, month: str) -> pd.Series:
+    """True where the row's Loading (Dispatched) Date actually falls in
+    ``month`` of ``year``.
 
     A dispatch counts when the loading cell holds a real date (day-first
     ``DD-MM-YYYY``) that is BOTH:
 
     * on or before today — a load date in the future hasn't shipped yet; and
-    * in the calendar month being reported on — regardless of which month the
-      order was originally booked in, since carry-forward orders routinely ship
-      later than their own Month bucket.
+    * in the calendar month AND year being reported on — regardless of which
+      month/year the order was originally booked in, since carry-forward
+      orders routinely ship later than their own Month bucket. Checking the
+      year (not just the month number) matters once reports span multiple
+      years, so a January-2027 dispatch never gets counted toward a
+      January-2026 report just because both are "January".
 
     Anything else doesn't count towards this month's Despatched: a blank cell,
     the literal ``Pending``, a future-dated load, or a load that happened in a
-    different month. (No year is stored anywhere, so the month numbers are
-    compared within the loading date's own year, which is what the single-year
-    reporting window needs.)
+    different month/year.
     """
     loaded = pd.to_datetime(loading, format=DATE_FORMAT, errors="coerce")
     target = MONTH_NUM.get(month.strip().upper())
     if target is None:
         return pd.Series(False, index=loading.index)
-    in_target_month = loaded.dt.month == target
+    in_target_month = (loaded.dt.month == target) & (loaded.dt.year == year)
     not_future = loaded <= pd.Timestamp(date.today())
     return loaded.notna() & in_target_month & not_future
 
@@ -285,14 +393,21 @@ def compute_country_breakup(
     """Per-country breakup dashboard, one row per unique Country.
 
     Every KPI follows the business-logic doc (``logic_docs/Export Kpi
-    project.docx``). Rows are first scoped to the reporting ``year`` (default:
-    the latest year in the sheet's ``Year`` column). If ``month`` is given, only
-    that month's rows are considered. All "count" KPIs are expressed in machines
-    (sum of Quantity over the matching rows); the "commitment changes" KPIs are
-    sums of their respective change-count columns across the country's overdue
-    rows.
+    project.docx``). By default this spans ALL years, not just the latest one:
+    an order booked in a prior year can still be pending/overdue today, so
+    scoping to one year by default would hide it, the same way scoping to one
+    month would (see the ``month`` behavior below). Pass an explicit ``year``
+    to scope down to just that year. If ``month`` is given, only that month's
+    rows are considered. All "count" KPIs are expressed in machines (sum of
+    Quantity over the matching rows); the "commitment changes" KPIs are sums of
+    their respective change-count columns across the country's overdue rows.
+    Rows pre-staged for a period that hasn't started yet are ignored (see
+    ``_drop_future_rows``) — a forecasted order isn't "pending" until its own
+    month/year actually arrives.
     """
-    df = _for_year(df, year if year is not None else latest_year(df))
+    df = _drop_future_rows(df)
+    if year is not None:
+        df = _for_year(df, year)
     if df.empty or COL_COUNTRY not in df.columns:
         return []
 

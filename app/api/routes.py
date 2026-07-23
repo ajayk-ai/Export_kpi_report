@@ -44,20 +44,22 @@ def index() -> str:
   <li><a href="/report.json?source=local">/report.json?source=local</a> — raw KPI + breakup JSON</li>
   <li><a href="/docs">/docs</a> — interactive API docs</li>
 </ul>
-<p>Filter the breakup month with <code>&amp;month=JULY</code>. Email a send with
-<code>POST /send</code>.</p>"""
+<p>Filter the breakup month with <code>&amp;month=july</code> (name, abbreviation, or
+number all work) and pick a reporting year with <code>&amp;year=2027</code>.
+Email a send with <code>POST /send</code>.</p>"""
 
 
 @router.get("/report", response_class=HTMLResponse, tags=["report"])
 def report_html(
     source: str = SourceParam,
-    month: str | None = Query(None, description="Breakup month, e.g. JULY; blank = latest"),
+    month: str | None = Query(None, description="Breakup month: name, abbreviation, or number; blank = latest"),
+    year: int | None = Query(None, description="Reporting year, e.g. 2027; blank = latest in data"),
     ai: bool = Query(True, description="Include the Gemini AI summary"),
 ) -> HTMLResponse:
     """The live HTML report — identical to what gets emailed."""
     try:
         df = load(source)
-        result = build_report(df, month=month, use_ai=ai)
+        result = build_report(df, month=month, year=year, use_ai=ai)
     except Exception as exc:  # noqa: BLE001 - surface a readable page, not a stack trace
         return HTMLResponse(_error_html(exc, source), status_code=502)
     return HTMLResponse(result.html)
@@ -67,12 +69,13 @@ def report_html(
 def report_json(
     source: str = SourceParam,
     month: str | None = Query(None),
+    year: int | None = Query(None),
     ai: bool = Query(False),
 ) -> JSONResponse:
     """The report data (KPIs + per-country breakup) as JSON."""
     try:
         df = load(source)
-        result = build_report(df, month=month, use_ai=ai)
+        result = build_report(df, month=month, year=year, use_ai=ai)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return JSONResponse(
@@ -90,6 +93,7 @@ def report_json(
 def send_report(
     source: str = SourceParam,
     month: str | None = Query(None),
+    year: int | None = Query(None),
     recipient: str | None = Query(None, description="Override EMAIL_RECIPIENT"),
     ai: bool = Query(True),
 ) -> dict:
@@ -101,7 +105,7 @@ def send_report(
         from ..clients.email_client import send_summary_email
 
         df = load(source)
-        result = build_report(df, month=month, use_ai=ai)
+        result = build_report(df, month=month, year=year, use_ai=ai)
         stamp = datetime.now().strftime("%d-%b-%Y %H:%M:%S")
         subject = f"{settings.email_subject} - {result.month} - {stamp}"
         send_summary_email(to, subject, result.text, result.html)
