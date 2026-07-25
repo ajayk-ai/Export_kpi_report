@@ -15,3 +15,6 @@ config/*.json
 
 # Scheduled-task run logs
 logs/
+
+#claude
+.claude/
