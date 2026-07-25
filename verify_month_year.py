@@ -43,7 +43,7 @@ def _row(month, year, qty, country="TESTLAND", loading="", **overrides) -> dict:
         "Commercial Clearance Status": "Pending",
         "production commitment Date": "",
         "production commitment Revise Date": "",
-        "Production Completion Date": "",
+        "Production Completion (Roll-out)Date": "",
         "Container Placement date": "",
         "Container Revision Date": "",
         "actual_container": "",

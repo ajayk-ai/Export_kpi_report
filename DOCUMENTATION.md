@@ -114,10 +114,10 @@ as-is including a sheet typo that's intentionally tolerated):
 | `revision commitment of loading date` | Earlier than today, or blank loading date, counts toward "Pending Orders". Nothing else reads this column — it is *not* what "New Committed Date" is based on, despite the similar name. |
 | `Production Commitment Date` | Among a country's overdue rows, the oldest one vs. today (in days) = "No of Days Delay from 1st Commitment". Also the fallback (when `Production Commitment Revise Date` is blank) for the effective commitment date used by "Over Due Breakup", "New Committed Date", and "Prdn – No of machines" pending. |
 | `Production Commitment Revise Date` | Wins over `Production Commitment Date` wherever both are used (Over Due Breakup, New Committed Date, Prdn – No of machines pending) whenever it's been given. |
-| `Production Completion Date` | If filled in, the row is excluded from "Prdn – No of machines" pending even if its commitment date has passed — production is genuinely done. |
+| `Production Completion (Roll-out)Date` | If filled in, the row is excluded from "Prdn – No of machines" pending even if its commitment date has passed — production is genuinely done. |
 | `Container Placement date` | Fallback (when `Container Revision Date` is blank) for the effective container date used by "Container Expected Date" and "Container – No of machines" pending. |
 | `Container Revision Date` | Wins over `Container Placement date` wherever both are used, whenever it's been given. |
-| `actual_container` | If filled in, the row is excluded from "Container – No of machines" pending even if its container date has passed — mirrors `Production Completion Date`. |
+| `actual_container` | If filled in, the row is excluded from "Container – No of machines" pending even if its container date has passed — mirrors `Production Completion (Roll-out)Date`. |
 | `Vessel Cut-Off Date` | Shown as-is per country (earliest, among overdue rows). |
 | `no of times commitment changes(prod)` *(or the sheet's misspelling `commitement`)* | Summed as "Prdn commitment changes", across the country's overdue rows. |
 | `no of comm container changes` | Summed as "Container commitment changes", across the country's overdue rows. |
@@ -195,8 +195,8 @@ across several KPIs below.
 | `days_delay` | Days Delay from 1st Commitment | Among the country's overdue rows (`over_due_breakup` mask), the oldest `Production Commitment Date` vs. today, in days — the single worst delay, not an average. 0 if none of those rows has a real date. |
 | `new_committed_date` | New Committed Date | the **earliest** `effective_commitment_date` among the country's overdue rows (`_earliest_effective_date`) — the oldest still-unresolved commitment, not the newest, despite the field name. |
 | `container_expected_date` | Container Expected Date | the **earliest** `effective_container_date` among the country's overdue rows. Same shape as `new_committed_date`, just for the container side. |
-| `prdn_machines_pending` | Prdn – No of machines | `SUM(Quantity)`, among the country's overdue rows, where `Production Completion Date` is blank **and** (`effective_commitment_date` is earlier than today **or** was never given at all — `_past_or_never_given`). |
-| `prdn_commitment_changes` | Prdn – Commitment Changes | `SUM(no of times commitment changes(prod))` across the country's overdue rows — not gated by `Production Completion Date`. |
+| `prdn_machines_pending` | Prdn – No of machines | `SUM(Quantity)`, among the country's overdue rows, where `Production Completion (Roll-out)Date` is blank **and** (`effective_commitment_date` is earlier than today **or** was never given at all — `_past_or_never_given`). |
+| `prdn_commitment_changes` | Prdn – Commitment Changes | `SUM(no of times commitment changes(prod))` across the country's overdue rows — not gated by `Production Completion (Roll-out)Date`. |
 | `container_machines_pending` | Container – No of machines | `SUM(Quantity)`, among the country's overdue rows, where `actual_container` is blank **and** (`effective_container_date` is earlier than today **or** was never given at all). Same shape as `prdn_machines_pending`. |
 | `container_commitment_changes` | Container – Commitment Changes | `SUM(no of comm container changes)` across the country's overdue rows — not gated by `actual_container`. |
 | `vessel_cutoff` | Vessel Cut-Off | earliest `Vessel Cut-Off Date` among the country's overdue rows. |

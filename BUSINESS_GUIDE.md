@@ -33,10 +33,10 @@ biggest risk in a few sentences.
 | `Country` | Which country/dealer's order this is — used to group the breakup table, one row per country. |
 | `Production Commitment Date` | When the machine was originally due to be ready. |
 | `Production Commitment Revise Date` | The factory's latest revised production commitment, when one has been given. Wins over the original date wherever both are used. |
-| `Production Completion Date` | When production actually finished. If this is filled in, the machine is no longer counted as "pending" on production — even if its commitment date has passed — because the work is genuinely done. |
+| `Production Completion (Roll-out)Date` | When production actually finished. If this is filled in, the machine is no longer counted as "pending" on production — even if its commitment date has passed — because the work is genuinely done. |
 | `revision commitment of loading date` | A *different* column from the one above — this is the revised loading/despatch commitment. It only drives **Pending Orders**; nothing else reads it. |
 | `Container Placement date` / `Container Revision Date` | When the container is expected, and any revision to that date. |
-| `actual_container` | When the container actually arrived/was assigned. If this is filled in, the order is no longer counted as "pending" on the container — mirrors `Production Completion Date` above, just for the container side. |
+| `actual_container` | When the container actually arrived/was assigned. If this is filled in, the order is no longer counted as "pending" on the container — mirrors `Production Completion (Roll-out)Date` above, just for the container side. |
 | `Vessel Cut-Off Date` | The shipping line's cut-off date for that order's vessel. |
 | `no of times commitment changes(prod)` | How many times the factory has pushed back its production commitment for that order. |
 | `no of comm container changes` | How many times the container commitment has changed for that order. |
@@ -182,7 +182,7 @@ Assume **today is 17-Jul-2026**, and `Kenya` has exactly these 5 rows:
 Row C already shipped (10-07-2026 is a real, past date), so it's excluded
 from every "still pending" calculation below. Row E is deliberately built
 to show what "already done" looks like: it's late on its original
-commitment dates, but both `Production Completion Date` and
+commitment dates, but both `Production Completion (Roll-out)Date` and
 `actual_container` are filled in — the work actually happened, it just
 happened after the original promise.
 
@@ -238,13 +238,13 @@ placement is 12-07-2026. Earliest of the two available = **15-06-2026**.
 
 **6. Prdn Committment Pending → No of machines**
 **Formula:** among the overdue rows, `SUM(Quantity)` where
-`Production Completion Date` is blank **AND** (the effective commitment
+`Production Completion (Roll-out)Date` is blank **AND** (the effective commitment
 date — Revise Date if given, else original — is past, **or** no commitment
 date was ever given at all).
 **Worked example:**
 - A: completion blank, effective 05-06-2026 is past → counts (6).
 - B: completion blank, effective 10-07-2026 is past → counts (4).
-- E: `Production Completion Date` is filled in (15-07-2026) → **excluded
+- E: `Production Completion (Roll-out)Date` is filled in (15-07-2026) → **excluded
   outright**, even though its own commitment date (10-06-2026) is also
   past — the machine is actually done, so it isn't "pending" anymore.
 
@@ -376,7 +376,7 @@ Commitment" (§4, KPI 3), which is also driven by the oldest date.
 
 **A row's commitment date is clearly in the past, but it's not counted in
 "No of machines pending" — why?**
-Check `Production Completion Date` (or `actual_container` for the
+Check `Production Completion (Roll-out)Date` (or `actual_container` for the
 container side). If either is filled in, the work is actually done, even
 though it happened after the original promise — so it's no longer
 "pending," it's just late history. See row E in the §4 worked example.

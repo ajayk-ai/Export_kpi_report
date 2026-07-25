@@ -34,7 +34,7 @@ COLUMNS = [
     "production commitment Date",
     "production commitment Revise Date",     # past -> Production Overdue
     "no of times commitment changes(prod)",  # -> Prdn commitment changes (avg)
-    "Production Completion Date",             # blank -> Prdn machines pending
+    "Production Completion (Roll-out)Date",   # blank -> Prdn machines pending
     "backlog days",
     "Container Placement date",              # blank -> Container machines pending; -> Container Expected Date
     "Container Revision Date",               # past -> Container Overdue
@@ -92,7 +92,7 @@ def _row(month, country, model, qty, *, year=2026, readiness="", machine_revisio
         "production commitment Date": readiness,
         "production commitment Revise Date": machine_revision,
         "no of times commitment changes(prod)": prdn_changes,
-        "Production Completion Date": production_completion,
+        "Production Completion (Roll-out)Date": production_completion,
         "backlog days": backlog,
         "Container Placement date": container_placement,
         "Container Revision Date": container_revision,

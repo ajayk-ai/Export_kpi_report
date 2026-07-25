@@ -17,7 +17,7 @@ const REQUIRED_HEADERS = [
   "revision commitment of loading date",
   "no of commitment loading changes",
   "production commitment Date",
-  "Production Completion Date",
+  "Production Completion (Roll-out)Date",
   "backlog days",
   "Container Placement date",
   "Loading (Dispatched) Date",
@@ -98,7 +98,7 @@ function calculateRow(sheet, row, editedCol, H) {
     // Backlog Days
     //----------------------------------------------------------
     let readiness = sheet.getRange(row, H["production commitment Date"]).getValue();
-    let completion = sheet.getRange(row, H["Production Completion Date"]).getValue();
+    let completion = sheet.getRange(row, H["Production Completion (Roll-out)Date"]).getValue();
 
     readiness = convertToDate(readiness);
     completion = convertToDate(completion);
