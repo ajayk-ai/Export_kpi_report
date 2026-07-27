@@ -44,6 +44,49 @@ emails a summary via Gmail — all authenticated with a Google service account.
   (Google Account > Security > App passwords) — your normal password will not
   work over SMTP.
 
+## Quick Start (Windows)
+
+Double-click **`start.bat`** or run manually:
+
+```bash
+uv run python -m app.main
+```
+
+This reads `HOST` / `PORT` from `.env` (default `http://0.0.0.0:8500`).
+
+> **First time?** Run `uv sync` first to create `.venv`.
+
+### Run in background with PM2 (no terminal needed)
+
+1. Install PM2 globally:
+
+   ```bash
+   npm install -g pm2
+   ```
+
+2. Start the app:
+
+   ```bash
+   pm2 start ecosystem.config.js
+   ```
+
+3. Useful PM2 commands:
+
+   ```bash
+   pm2 status              # check running processes
+   pm2 logs kpi-server     # view live logs
+   pm2 restart kpi-server  # restart the app
+   pm2 stop kpi-server     # stop the app
+   pm2 delete kpi-server   # remove from PM2
+   ```
+
+4. (Optional) Auto-start on system boot:
+
+   ```bash
+   pm2 startup
+   pm2 save
+   ```
+
 ## Run
 
 Run from the project root:
