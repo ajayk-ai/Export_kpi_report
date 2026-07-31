@@ -220,6 +220,31 @@ def latest_month(df: pd.DataFrame, year: int | None = None) -> str:
     return MONTH_ORDER[-1]
 
 
+def current_report_month(df: pd.DataFrame, year: int | None = None) -> str:
+    """Which month's row the report shows by default: whichever is LATER
+    between the latest month that actually has data (``latest_month``), and
+    — when ``year`` is the current calendar year — today's real calendar
+    month.
+
+    This is what makes the report track the real calendar instead of
+    silently freezing on last month: once August 1st arrives the report
+    shows AUGUST (opening balance carried forward, zero new orders yet)
+    immediately, even before the team has logged a single August row —
+    rather than waiting for the first August row to show up before
+    switching. For a past/other ``year``, or the rare case the calendar
+    month is somehow behind the data, this just falls back to
+    ``latest_month``.
+    """
+    target_year = year if year is not None else latest_year(df)
+    data_month = latest_month(df, target_year)
+    today = date.today()
+    if target_year == today.year:
+        calendar_month = MONTH_ORDER[today.month - 1]
+        if MONTH_ORDER.index(calendar_month) > MONTH_ORDER.index(data_month):
+            return calendar_month
+    return data_month
+
+
 def _earliest_year(df: pd.DataFrame, default: int) -> int:
     """The earliest reporting year in the sheet's ``Year`` column, or ``default``
     when the column is absent/blank."""
@@ -241,8 +266,10 @@ def compute_all_kpis(df: pd.DataFrame, year: int | None = None) -> list[dict]:
 
     ``year`` defaults to the latest year in the sheet's ``Year`` column. Each
     returned row carries its ``year``. The result is trimmed on both ends: it
-    stops at the latest month that actually has data in the target year (via
-    ``latest_month``), so a report doesn't show empty future months; and it
+    stops at ``current_report_month`` — the later of the latest month with
+    data and (for the current calendar year) today's actual month — so a
+    report doesn't show empty future months, but also doesn't freeze on last
+    month just because nobody's logged this month's data yet; and it
     skips leading months that are both dataless (no new orders) AND carry no
     balance forward (a zero opening order), so a year that starts reporting
     partway through (e.g. business data beginning in May) doesn't pad the
@@ -268,7 +295,7 @@ def compute_all_kpis(df: pd.DataFrame, year: int | None = None) -> list[dict]:
                 kpi["year"] = y
                 results.append(kpi)
 
-    cutoff = MONTH_ORDER.index(latest_month(df, target_year)) + 1
+    cutoff = MONTH_ORDER.index(current_report_month(df, target_year)) + 1
     results = results[:cutoff]
 
     start = 0

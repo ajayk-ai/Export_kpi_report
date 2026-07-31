@@ -16,7 +16,7 @@ from ..config import settings
 from .kpi_engine import (
     compute_all_kpis,
     compute_country_breakup,
-    latest_month,
+    current_report_month,
     latest_year,
     normalize_month,
     unmapped_month_values,
@@ -87,7 +87,7 @@ def build_report(
         month_input = normalized
 
     # Label for the monthly-summary section and the email subject.
-    report_month = month_input or latest_month(df, report_year)
+    report_month = month_input or current_report_month(df, report_year)
     # The Monthly Summary section shows ONLY this one month's row, not the
     # full multi-month history — `kpis` above is still the full history
     # because that's what makes report_month's opening_order correct (it's
