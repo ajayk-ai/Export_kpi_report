@@ -7,8 +7,7 @@ opening balance forward correctly across both months AND years using the
 Year column -- e.g. a pending order from Dec-2026 must show up as Jan-2027's
 opening balance.
 
-No test framework is added; this follows the same "run it, read the output"
-pattern as run_local.py.
+No test framework is added; just "run it, read the output".
 
 Run:  uv run python verify_month_year.py
 """

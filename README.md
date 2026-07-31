@@ -96,7 +96,6 @@ Run from the project root:
 ```bash
 uv run python main.py            # print the KPI summary
 uv run python main.py --send     # print and email the summary
-uv run python run_local.py       # offline: compute from data/test_data.xlsx + write an HTML preview
 ```
 
 ### Live web API (FastAPI)
@@ -113,19 +112,16 @@ Then open:
 | Endpoint | What it does |
 | --- | --- |
 | `GET /` | Landing page with links |
-| `GET /report?source=sheet` | Live HTML report from Google Sheets (the email template) |
-| `GET /report?source=local` | Same report from `data/test_data.xlsx` (offline, no creds) |
-| `GET /report?...&month=JULY` | Filter the breakup to a month; `&ai=false` skips the AI summary |
-| `GET /report.json?source=sheet` | KPIs + per-country breakup as JSON |
-| `POST /send?source=sheet` | Compute and email the report (`&recipient=...` to override) |
+| `GET /report` | Live HTML report from Google Sheets (the email template) |
+| `GET /report?month=JULY` | Filter the breakup to a month; `&ai=false` skips the AI summary |
+| `GET /report.json` | KPIs + per-country breakup as JSON |
+| `POST /send` | Compute and email the report (`?recipient=...` to override) |
 | `GET /docs` | Interactive Swagger UI |
 
 ## Project layout
 
 ```
 main.py                     CLI entry point (argparse)
-run_local.py                Offline runner (local .xlsx -> text + HTML preview)
-make_test_data.py           Generate data/test_data.xlsx
 app/
   config.py                 Settings loaded from .env (single `settings` object)
   main.py                   FastAPI app factory (`uvicorn app.main:app`)
@@ -135,7 +131,7 @@ app/
     kpi_engine.py           Pure KPI math over a DataFrame (no I/O)
     report.py               Render KPIs as plain text and colorful HTML
     pipeline.py             Orchestration + `build_report()` shared by CLI & API
-    data_source.py          Pick the data source: Google Sheet or local .xlsx
+    data_source.py          Live Google Sheet loader
   clients/
     sheets_client.py        Read the sheet via service account / delegation
     gemini_client.py        AI summary of the KPIs via Google Gemini

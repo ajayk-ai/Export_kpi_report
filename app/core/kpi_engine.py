@@ -43,6 +43,32 @@ def normalize_month(value: str | int | None) -> str | None:
         return None
     return _MONTH_LOOKUP.get(key)
 
+
+def _normalized_month_column(df: pd.DataFrame) -> pd.Series:
+    """The sheet's ``Month`` column, each value resolved through
+    ``normalize_month`` (so 'June'/'Jun'/'JUNE'/'6'/'06' all become 'JUNE').
+
+    Different people fill in the sheet over time and don't all spell months
+    the same way; matching on the raw string (as this used to do) silently
+    drops any row that isn't the one exact canonical form, undercounting that
+    month and throwing off which month ``latest_month`` picks as current.
+    A value that doesn't resolve to any known month (e.g. a genuine typo like
+    'Augest') becomes ``None`` here and is reported via
+    ``unmapped_month_values`` rather than silently vanishing.
+    """
+    return _col(df, "Month").map(normalize_month)
+
+
+def unmapped_month_values(df: pd.DataFrame) -> list[str]:
+    """Distinct raw ``Month`` values that don't resolve to any real month.
+
+    Surfaces data-entry typos (e.g. 'Augest') that would otherwise silently
+    drop that row out of every KPI count. Blank cells are ignored.
+    """
+    raw = _col(df, "Month").astype(str).str.strip()
+    unresolved = raw[(raw != "") & raw.map(normalize_month).isna()]
+    return sorted(unresolved.unique().tolist())
+
 # Raw sheet column headers (SCM_Export tab, columns A–T). Kept here so a header
 # rename in the sheet is a one-line fix.
 # The reporting year the row belongs to. The planning team enters this per row;
@@ -83,8 +109,10 @@ def compute_month_kpis(df: pd.DataFrame, month: str, year: int, prev_balance: in
     # always >= 0 (see below), so opening order is never negative either.
     opening_order = prev_balance
 
-    # Case/whitespace-insensitive month match, so 'July'/' JULY ' both work.
-    in_month = _col(df, "Month").astype(str).str.strip().str.upper() == month.upper()
+    # Match via normalize_month, not a raw string compare, so 'July'/'JUL'/'7'
+    # all land in the same bucket as 'JULY' regardless of how a given row was
+    # typed (see _normalized_month_column).
+    in_month = _normalized_month_column(df) == month.upper()
     qty = _to_numeric(_col(df, COL_QUANTITY))
 
     # New orders: every order line in the month. (There's no longer an Order Type
@@ -125,7 +153,7 @@ def _is_future_period(df: pd.DataFrame) -> pd.Series:
     """
     today = date.today()
     years = pd.to_numeric(df.get(COL_YEAR, pd.Series(dtype=str, index=df.index)), errors="coerce")
-    months = _col(df, "Month").astype(str).str.strip().str.upper().map(MONTH_NUM)
+    months = _normalized_month_column(df).map(MONTH_NUM)
     known = years.notna() & months.notna()
     future = known & ((years > today.year) | ((years == today.year) & (months > today.month)))
     return future.fillna(False)
@@ -185,7 +213,7 @@ def latest_month(df: pd.DataFrame, year: int | None = None) -> str:
     """
     df = _drop_future_rows(df)
     df = _for_year(df, year if year is not None else latest_year(df))
-    present = set(df.get("Month", pd.Series(dtype=str)).astype(str).str.strip().str.upper())
+    present = set(_normalized_month_column(df).dropna())
     for month in reversed(MONTH_ORDER):
         if month in present:
             return month
@@ -413,7 +441,11 @@ def compute_country_breakup(
 
     df = df.copy()
     if month is not None:
-        df = df[df["Month"].astype(str).str.strip().str.upper() == month.upper()]
+        # Accept the same flexible input normalize_month does (full name,
+        # abbreviation, or number) rather than requiring an already-canonical
+        # name — callers other than the pipeline shouldn't have to pre-resolve it.
+        target = normalize_month(month) or month.strip().upper()
+        df = df[_normalized_month_column(df) == target]
         if df.empty:
             return []
 

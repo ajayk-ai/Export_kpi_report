@@ -19,6 +19,7 @@ from .kpi_engine import (
     latest_month,
     latest_year,
     normalize_month,
+    unmapped_month_values,
 )
 from .report import html_report, text_summary
 
@@ -51,7 +52,10 @@ def build_report(
     3-letter abbreviation, or a number (e.g. "July"/"Jul"/"7"); when ``None`` it
     falls back to ``REPORT_MONTH`` from .env, then the latest month in the
     data. ``year`` overrides the reporting year; when ``None`` it falls back to
-    ``REPORT_YEAR`` from .env, then the latest year in the data. Set
+    ``REPORT_YEAR`` from .env, then the latest year in the data. The Monthly
+    Summary section (and the AI summary) covers only that one month — its
+    Opening Order is still carried forward correctly from every prior month's
+    balance, those earlier months just aren't displayed as their own rows. Set
     ``use_ai=False`` to skip the Gemini call (e.g. for a fast local preview).
     """
     if df is None:
@@ -84,6 +88,17 @@ def build_report(
 
     # Label for the monthly-summary section and the email subject.
     report_month = month_input or latest_month(df, report_year)
+    # The Monthly Summary section shows ONLY this one month's row, not the
+    # full multi-month history — `kpis` above is still the full history
+    # because that's what makes report_month's opening_order correct (it's
+    # carried forward from every prior month's balance); we just don't
+    # display the earlier rows. Falls back to the last computed month if
+    # report_month somehow isn't among them (shouldn't happen in practice).
+    current_kpi = next((k for k in kpis if k["month"] == report_month), None)
+    if current_kpi is None:
+        current_kpi = kpis[-1] if kpis else None
+    current_month_kpis = [current_kpi] if current_kpi else []
+
     # The per-country breakup spans ALL months AND ALL years by default: an
     # order booked in a prior month (or a prior year) can still be
     # pending/overdue today, so scoping to `report_year` here would hide it —
@@ -92,11 +107,23 @@ def build_report(
     # explicit `month` (or set REPORT_MONTH) to scope the breakup by month.
     breakup_month = month_input or None  # None/"" -> all data
     breakup = compute_country_breakup(df, month=breakup_month)
-    ai_summary = generate_summary(kpis, breakup) if use_ai else ""
+    # AI summary also only sees the current month's KPIs (matches what the
+    # table shows) — it comments on this month, not the multi-month trend.
+    ai_summary = generate_summary(current_month_kpis, breakup) if use_ai else ""
 
-    text = text_summary(kpis, breakup, ai_summary, year=report_year)
-    html = html_report(kpis, breakup, ai_summary, month=breakup_month, year=report_year)
-    return ReportResult(report_month, report_year, kpis, breakup, ai_summary, text, html)
+    # Raw Month-column values (e.g. a typo like 'Augest') that couldn't be
+    # matched to a real month and were excluded from every KPI above — shown
+    # in the report so a data-entry mistake is visible, not silent.
+    unmapped_months = unmapped_month_values(df)
+
+    text = text_summary(
+        current_month_kpis, breakup, ai_summary, year=report_year, unmapped_months=unmapped_months
+    )
+    html = html_report(
+        current_month_kpis, breakup, ai_summary, month=breakup_month, year=report_year,
+        unmapped_months=unmapped_months,
+    )
+    return ReportResult(report_month, report_year, current_month_kpis, breakup, ai_summary, text, html)
 
 
 def run(

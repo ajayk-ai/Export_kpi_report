@@ -51,7 +51,7 @@ uv run python main.py
 
 # Web — start live server
 uv run python -m app.main
-# Open http://127.0.0.1:8000/report?source=sheet
+# Open http://127.0.0.1:8000/report
 ```
 
 ## 4. Run as a Service (PM2 — No Terminal Needed)
@@ -125,7 +125,6 @@ Unregister-ScheduledTask -TaskName "ExportKPIDailyReport"
 ```
 Export-kpi-automation/
 ├── main.py                 CLI entry point
-├── run_local.py            Offline runner (local .xlsx)
 ├── app/
 │   ├── main.py             FastAPI app (HOST/PORT from .env)
 │   ├── config.py           Settings from .env
@@ -134,7 +133,7 @@ Export-kpi-automation/
 │   │   ├── kpi_engine.py   KPI math (pure functions)
 │   │   ├── report.py       Text + HTML rendering
 │   │   ├── pipeline.py     Orchestration (build_report)
-│   │   └── data_source.py  Sheet or local .xlsx
+│   │   └── data_source.py  Live Google Sheet loader
 │   └── clients/
 │       ├── sheets_client.py   Google Sheets reader
 │       ├── gemini_client.py   AI summary (optional)
@@ -152,11 +151,10 @@ Export-kpi-automation/
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Landing page with links |
-| `/report?source=sheet` | GET | Live HTML report from Google Sheets |
-| `/report?source=local` | GET | Report from `data/test_data.xlsx` (offline) |
-| `/report?...&month=JULY` | GET | Filter breakup to a month |
-| `/report.json?source=sheet` | GET | KPIs as JSON |
-| `/send?source=sheet` | POST | Compute and email the report |
+| `/report` | GET | Live HTML report from Google Sheets |
+| `/report?month=JULY` | GET | Filter breakup to a month |
+| `/report.json` | GET | KPIs as JSON |
+| `/send` | POST | Compute and email the report |
 | `/health` | GET | Health check |
 | `/docs` | GET | Swagger UI |
 

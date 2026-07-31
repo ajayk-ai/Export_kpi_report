@@ -42,12 +42,19 @@ def text_summary(
     breakup: list[dict] | None = None,
     ai_summary: str = "",
     year: int | None = None,
+    unmapped_months: list[str] | None = None,
 ) -> str:
     """Plain-text version, used as the email fallback and for console output.
 
-    Shows every month's KPI line so the opening/balance carry-forward trend is
-    visible; the breakup below is already scoped to its target month. ``year``
+    ``kpis`` normally holds a single row — the current/target month, with its
+    Opening Order already carried forward from every prior month's balance
+    (see ``pipeline.build_report``); the breakup below is already scoped to
+    its target month. ``year``
     (the reporting year the figures cover) is shown as a heading when given.
+    ``unmapped_months``, if given, lists raw Month-column values (e.g. a typo
+    like 'Augest') that couldn't be matched to a real month and were excluded
+    from every KPI count — surfaced so a data-entry mistake is visible instead
+    of silently vanishing.
     """
     lines = [
         f"{k['month']}: "
@@ -65,6 +72,9 @@ def text_summary(
         body = f"{body}\n\n{_breakup_text(breakup)}"
     if ai_summary:
         body = f"{body}\n\nAI Summary:\n{ai_summary}"
+    if unmapped_months:
+        values = ", ".join(unmapped_months)
+        body = f"WARNING: Unrecognized Month value(s) in the sheet, excluded from all KPIs: {values}\n\n{body}"
     return body
 
 
@@ -357,12 +367,29 @@ def _breakup_section_html(breakup: list[dict]) -> str:
     </div>"""
 
 
+def _unmapped_months_warning_html(unmapped_months: list[str] | None) -> str:
+    """A warning banner listing raw Month-column typos excluded from every KPI
+    count (e.g. 'Augest'), so a data-entry mistake is visible in the report
+    instead of the affected rows silently vanishing."""
+    if not unmapped_months:
+        return ""
+    values = escape(", ".join(unmapped_months))
+    return (
+        f'<div style="background:#fef2f2;border-left:4px solid {_NEG};'
+        f'padding:10px 14px;margin-bottom:16px;border-radius:4px;'
+        f'color:#991b1b;font-size:13px;">'
+        f"⚠ Unrecognized Month value(s) in the sheet, excluded from all KPIs: "
+        f"<strong>{values}</strong></div>"
+    )
+
+
 def html_report(
     kpis: list[dict],
     breakup: list[dict] | None = None,
     ai_summary: str = "",
     month: str | None = None,
     year: int | None = None,
+    unmapped_months: list[str] | None = None,
 ) -> str:
     """A self-contained, inline-styled HTML report suitable for email."""
     year_label = f" &middot; {year}" if year is not None else ""
@@ -377,6 +404,7 @@ def html_report(
     <div style="color:#9ca3af;font-size:13px;margin-top:4px;">Generated on {date.today():%d %b %Y}</div>
   </div>
   <div style="border:1px solid {_BORDER};border-top:none;border-radius:0 0 8px 8px;padding:24px;">
+    {_unmapped_months_warning_html(unmapped_months)}
     {summary_heading}
     {_summary_table_html(kpis)}
     {_breakup_section_html(breakup or [])}

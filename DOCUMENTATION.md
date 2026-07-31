@@ -33,9 +33,8 @@ uv run uvicorn app.main:app --reload     # Web: live report at /report
                                              │
 config/service.json (Google creds) ─────────┤
                                              ▼
-     app/core/data_source.py ── from_sheet() ─► app/clients/sheets_client.py ─┐
-        │  from_local()                            (Google Sheet -> DataFrame) │
-        └─► data/test_data.xlsx (offline) ─────────────────────────────────────┤
+     app/core/data_source.py ── load() ────► app/clients/sheets_client.py
+                                               (Google Sheet -> DataFrame)
                                              ▼
                                    app/core/kpi_engine.py
                               (compute_all_kpis, compute_country_breakup)
@@ -62,7 +61,7 @@ CLI (`run`), the web routes, and the emailer all go through it, so console,
 browser, and email always show the identical report:
 
 ```
-df = data_source.load(source)              # 'sheet' (default) or 'local'
+df = data_source.load()                    # live Google Sheet
 kpis = compute_all_kpis(df)
 report_month = month_override or REPORT_MONTH or latest_month(df)   # summary/subject label
 breakup = compute_country_breakup(df, month=month_override or REPORT_MONTH or None)
@@ -85,11 +84,10 @@ about and test independently of Sheets/SMTP/Gemini.
 | File | Responsibility |
 |---|---|
 | [main.py](main.py) | CLI entry point (`argparse`); prints the summary, optionally passes `--send`. |
-| [run_local.py](run_local.py) | Offline runner: compute from a local `.xlsx` and write an HTML preview. |
 | [app/main.py](app/main.py) | FastAPI application factory; run with `uvicorn app.main:app`. |
 | [app/api/routes.py](app/api/routes.py) | HTTP endpoints: `/report` (live HTML — the email template), `/report.json`, `/send`, `/health`, `/`. |
 | [app/config.py](app/config.py) | Loads `.env` once into a frozen `Settings` dataclass (`settings`). Also injects the OS trust store into `ssl` so corporate TLS-inspection proxies don't break HTTPS calls. |
-| [app/core/data_source.py](app/core/data_source.py) | Chooses the data source — the live Google Sheet or a local `.xlsx` — returning the same string-typed DataFrame either way. |
+| [app/core/data_source.py](app/core/data_source.py) | Loads the report's DataFrame from the live Google Sheet. |
 | [app/clients/sheets_client.py](app/clients/sheets_client.py) | Authenticates with a Google service account (optionally impersonating a Workspace user via domain-wide delegation) and pulls the worksheet into a `pandas.DataFrame` via `gspread`. |
 | [app/core/kpi_engine.py](app/core/kpi_engine.py) | All business logic / math. See §4 and §5 below. |
 | [app/clients/gemini_client.py](app/clients/gemini_client.py) | Builds a prompt from the KPIs + breakup and asks Gemini for an executive summary. Fully optional — degrades to `""` silently on any error or missing API key. |

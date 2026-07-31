@@ -54,6 +54,10 @@ class Settings:
     gemini_api_key: str
     gemini_model: str
 
+    # Web server bind
+    host: str
+    port: int
+
     @classmethod
     def load(cls) -> "Settings":
         smtp_user = os.getenv("SMTP_USER", "")
@@ -77,6 +81,8 @@ class Settings:
             email_subject=os.getenv("EMAIL_SUBJECT", "Export KPI Report"),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            host=os.getenv("HOST", "0.0.0.0"),
+            port=int(os.getenv("PORT", "8000")),
         )
 
 
