@@ -97,7 +97,31 @@ COL_CLEARANCE_STATUS = "Commercial Clearance Status"
 # Columns referenced by the business-logic doc's breakup KPIs.
 COL_REVISION_COMMITMENT_LOADING = "revision commitment of loading date"  # -> New Committed Date
 
-DATE_FORMAT = "%d-%m-%Y"  # sheet stores dates day-first (e.g. 07-07-2026)
+DATE_FORMAT = "%d-%m-%Y"  # how dates are rendered back out (e.g. 07-07-2026)
+
+# Day-first date formats the sheet actually contains. Different columns are
+# filled in by different teams and don't agree on a format: some use
+# DD-MM-YYYY, others DD.MM.YY. Parsing only one of them silently turns every
+# value in the other style into "no date" — which is how dispatched loads,
+# vessel cut-offs and container dates all went missing from the report.
+# Anything matching none of these (e.g. the literal "TBC") is genuinely no
+# date and correctly stays blank.
+_INPUT_DATE_FORMATS = ("%d-%m-%Y", "%d.%m.%y")
+
+
+def _parse_date_series(col: pd.Series) -> pd.Series:
+    """Parse a day-first date column, accepting every format the sheet uses.
+
+    Each format is tried in turn and only fills the cells still unparsed, so a
+    column may freely mix styles. Unparseable/blank cells become NaT.
+    """
+    values = col.astype(str).str.strip()
+    parsed = pd.to_datetime(values, format=_INPUT_DATE_FORMATS[0], errors="coerce")
+    for fmt in _INPUT_DATE_FORMATS[1:]:
+        if parsed.notna().all():
+            break
+        parsed = parsed.fillna(pd.to_datetime(values, format=fmt, errors="coerce"))
+    return parsed
 
 # A machine's clearance is pending when its status is literally "Pending" or
 # blank (per the business-logic doc); every other value counts as cleared.
@@ -346,7 +370,7 @@ def _is_dispatched_in_year_month(loading: pd.Series, year: int, month: str) -> p
     the literal ``Pending``, a future-dated load, or a load that happened in a
     different month/year.
     """
-    loaded = pd.to_datetime(loading, format=DATE_FORMAT, errors="coerce")
+    loaded = _parse_date_series(loading)
     target = MONTH_NUM.get(month.strip().upper())
     if target is None:
         return pd.Series(False, index=loading.index)
@@ -362,7 +386,7 @@ def _clearance_pending(series: pd.Series) -> pd.Series:
 
 def _dates(col: pd.Series) -> pd.Series:
     """Parse a day-first date column; unparseable/blank cells become NaT."""
-    return pd.to_datetime(col, format=DATE_FORMAT, errors="coerce")
+    return _parse_date_series(col)
 
 
 def _is_past(col: pd.Series) -> pd.Series:
@@ -409,7 +433,7 @@ def _min_date(mask: pd.Series, *cols: pd.Series) -> str:
     """
     best = None
     for col in cols:
-        parsed = pd.to_datetime(col[mask], format=DATE_FORMAT, errors="coerce").dropna()
+        parsed = _parse_date_series(col[mask]).dropna()
         if not parsed.empty:
             candidate = parsed.min()
             best = candidate if best is None else min(best, candidate)
@@ -435,7 +459,7 @@ def _worst_delay_days(mask: pd.Series, col: pd.Series) -> int:
     worst delay from 1st commitment — not an average across rows. Returns 0
     when no masked row holds a real date.
     """
-    parsed = pd.to_datetime(col[mask], format=DATE_FORMAT, errors="coerce").dropna()
+    parsed = _parse_date_series(col[mask]).dropna()
     if parsed.empty:
         return 0
     oldest = parsed.min()
