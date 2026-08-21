@@ -1,4 +1,6 @@
 """KPI computation. Pure functions over a DataFrame — no I/O."""
+import difflib
+import re
 from datetime import date
 
 import pandas as pd
@@ -28,20 +30,92 @@ _MONTH_LOOKUP = {
 }
 
 
-def normalize_month(value: str | int | None) -> str | None:
-    """Resolve flexible month input to its canonical MONTH_ORDER name.
+# Pull out the letter-runs and digit-runs of a value, whatever separates them
+# (or even if nothing does): "Aug-26", "Aug 26", "Aug/26", "Aug.26", "Aug'26",
+# "AUG26" and "22.07.26" all tokenize cleanly.
+_TOKEN_RE = re.compile(r"[A-Z]+|\d+")
 
-    Accepts a full name ("July"/"JULY"/" july "), a 3-letter abbreviation
-    ("Jul"/"JUL"), or a calendar number ("7", "07", 7). Returns ``None`` if
-    ``value`` is blank or doesn't match any of the above, so callers can
-    surface a clear error instead of silently matching nothing.
+
+def _month_from_name(token: str) -> str | None:
+    """An alphabetic token -> month name, tolerating abbreviations and typos.
+
+    Three passes, each stricter than the next is loose: an exact alias
+    ("JULY"/"JUL"), a unique name prefix so any abbreviation length works
+    ("SEPT", "AUGU", "FEBR"), then a close-match pass so ordinary
+    misspellings ("AUGEST", "FEBUARY", "JANURARY") still land on the right
+    month. A prefix or near-match that fits more than one month is left
+    unresolved rather than guessed at.
+    """
+    month = _MONTH_LOOKUP.get(token)
+    if month is not None:
+        return month
+    if not token.isalpha() or len(token) < 3:
+        return None
+    prefixed = [m for m in MONTH_ORDER if m.startswith(token)]
+    if len(prefixed) == 1:
+        return prefixed[0]
+    close = difflib.get_close_matches(token, MONTH_ORDER, n=1, cutoff=0.8)
+    return close[0] if close else None
+
+
+def _month_from_number(token: str) -> str | None:
+    """A 1- or 2-digit calendar number -> month name; ``None`` otherwise.
+
+    A 3+ digit token is a year (or junk), never a month.
+    """
+    if not token.isdigit() or len(token) > 2:
+        return None
+    num = int(token)
+    return MONTH_ORDER[num - 1] if 1 <= num <= 12 else None
+
+
+def normalize_month(value: str | int | None) -> str | None:
+    """Resolve however a person typed a month to its canonical MONTH_ORDER name.
+
+    The Month column is filled in by different people over time and they do
+    not agree on a format, so this accepts essentially any reasonable way of
+    writing one:
+
+    * a name, any case, any abbreviation length -- "July", "JULY", " july ",
+      "Jul", "Sept"
+    * a common misspelling -- "Augest", "Febuary", "Janurary"
+    * a calendar number -- 7, "7", "07"
+    * a month with a year attached, in any order and with any separator --
+      "Aug-26", "July-26", "AUG26", "Aug '26", "06/2026", "2026-08", "26 Aug"
+    * a day-first date -- "22.07.26", "01-08-2026" (the middle field is the
+      month)
+
+    Returns ``None`` only when nothing in the value looks like a month, so
+    callers can surface a clear warning (see ``unmapped_month_values``)
+    instead of silently dropping the row.
     """
     if value is None:
         return None
     key = str(value).strip().upper()
     if not key:
         return None
-    return _MONTH_LOOKUP.get(key)
+
+    tokens = _TOKEN_RE.findall(key)
+    if not tokens:
+        return None
+
+    # A named month anywhere in the value wins -- it is unambiguous in a way
+    # bare numbers are not ("Aug-26" and "26 Aug" are both August).
+    for token in tokens:
+        if not token.isdigit():
+            month = _month_from_name(token)
+            if month is not None:
+                return month
+
+    numeric = [t for t in tokens if t.isdigit()]
+    # A full day-first date: day / month / year -- take the middle field.
+    if len(numeric) == 3:
+        return _month_from_number(numeric[1])
+    # Otherwise the one field that can be a month is the month ("08-26",
+    # "2026-08"). If two both could be ("11-12"), month-first is the
+    # convention these sheets use.
+    candidates = [m for m in (_month_from_number(t) for t in numeric) if m]
+    return candidates[0] if candidates else None
 
 
 def _normalized_month_column(df: pd.DataFrame) -> pd.Series:
@@ -89,7 +163,9 @@ COL_CONTAINER_PLACEMENT = "Container Placement date"
 COL_CONTAINER_REVISION = "Container Revision Date"
 COL_CONTAINER_CHANGES = "no of comm container changes"
 COL_PRODUCTION_COMPLETION = "Production Completion (Roll-out)Date"
-COL_ACTUAL_CONTAINER = "actual_container"
+# The sheet has used both names for this column; accept either, or a rename
+# silently makes every container read as "not yet arrived".
+COL_ACTUAL_CONTAINER = ("actual_container", "actual_container_date")
 COL_LOADING_DATE = "Loading (Dispatched) Date"
 COL_OVERDUE_DAYS = "over due days"
 COL_VESSEL_CUTOFF = "Vessel Cut-Off Date"

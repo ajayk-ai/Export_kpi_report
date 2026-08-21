@@ -16,7 +16,12 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from app.core.kpi_engine import compute_all_kpis, compute_country_breakup, normalize_month
+from app.core.kpi_engine import (
+    MONTH_NUM,
+    compute_all_kpis,
+    compute_country_breakup,
+    normalize_month,
+)
 
 # All scenarios run under this fixed "today" so results never depend on (or
 # drift with) the real wall-clock date. Chosen well after every non-future
@@ -184,13 +189,46 @@ def test_breakup_spans_all_years_by_default():
 
 
 def test_normalize_month_flexible_input():
-    """TC8: REPORT_MONTH / --month / ?month= accept name, abbreviation, or number."""
-    cases = [
-        ("July", "JULY"), ("JUL", "JULY"), ("jul", "JULY"),
-        ("7", "JULY"), ("07", "JULY"), ("garbage", None), ("", None),
-    ]
-    bad = [(v, e, normalize_month(v)) for v, e in cases if normalize_month(v) != e]
-    check("TC8 normalize_month_flexible_input: all formats resolve correctly", not bad, str(bad))
+    """TC8: however a person types a month, it resolves to the same bucket.
+
+    The Month column is filled in by different people over time and the
+    format has changed under the report more than once in production (plain
+    names first, later "Aug-26"), silently zeroing every KPI each time. This
+    walks all 12 months through every way one might reasonably be written so
+    a future format shift is caught here instead of in an emailed report.
+    """
+    bad = []
+    for full, num in MONTH_NUM.items():
+        short, title = full[:3].title(), full.title()
+        variants = [
+            full, title, full.lower(), f" {title} ",          # name, any case
+            full[:3], short.lower(), full[:4].title(),        # any abbreviation length
+            str(num), f"{num:02d}", num,                      # calendar number
+            f"{short}-26", f"{title}-26", f"{short}26",       # month + 2-digit year
+            f"{short}'26", f"{short}.26", f"{short}/26",
+            f"{short} 2026", f"26-{short}",                   # year first
+            f"{num:02d}/2026", f"2026-{num:02d}", f"{num:02d}-26",
+            f"22.{num:02d}.26", f"01-{num:02d}-2026",         # day-first dates
+        ]
+        bad += [(v, full, normalize_month(v)) for v in variants
+                if normalize_month(v) != full]
+    check(
+        "TC8a normalize_month: every month resolves from every written form",
+        not bad, f"{len(bad)} mismatches, first few: {bad[:5]}",
+    )
+
+    # Common misspellings should still land on the right month.
+    typos = {"Augest": "AUGUST", "Febuary": "FEBRUARY", "Janurary": "JANUARY",
+             "Sepetember": "SEPTEMBER", "Aprl": "APRIL"}
+    bad_typos = [(v, e, normalize_month(v)) for v, e in typos.items()
+                 if normalize_month(v) != e]
+    check("TC8b normalize_month: common misspellings resolve", not bad_typos, str(bad_typos))
+
+    # Anything that genuinely is not a month must stay unresolved, so it gets
+    # surfaced as a warning rather than silently counted as some month.
+    non_months = ["", "   ", "TBC", "Total", "N/A", "2026", "26", "Country", "-", "xyz"]
+    bad_junk = [(v, normalize_month(v)) for v in non_months if normalize_month(v) is not None]
+    check("TC8c normalize_month: non-month values stay unresolved", not bad_junk, str(bad_junk))
 
 
 def main() -> None:
